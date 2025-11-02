@@ -1,0 +1,916 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes jump824 {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-200%);
+  }
+}
+
+.dot-wave {
+  --uib-size: 50px;
+  --uib-speed: 0.6s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: var(--uib-size);
+  height: calc(var(--uib-size) * 0.17);
+}
+
+.dot-wave__dot {
+  flex-shrink: 0;
+  width: calc(var(--uib-size) * 0.17);
+  height: calc(var(--uib-size) * 0.17);
+  border-radius: 50%;
+  background-color: white;
+  animation: jump824 var(--uib-speed) ease-in-out infinite;
+}
+
+.dot-wave__dot:nth-child(1) {
+  animation-delay: calc(var(--uib-speed) * -0.45);
+}
+
+.dot-wave__dot:nth-child(2) {
+  animation-delay: calc(var(--uib-speed) * -0.3);
+}
+
+.dot-wave__dot:nth-child(3) {
+  animation-delay: calc(var(--uib-speed) * -0.15);
+}
+
+.dot-wave__dot:nth-child(4) {
+  animation-delay: 0s;
+}
+
+.container input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.container {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Create a custom checkbox */
+.checkmark {
+  --clr: var(--color-blue-600);
+  position: relative;
+  top: 0;
+  left: 0;
+  height: 1.2em;
+  width: 1.2em;
+  background-color: #ccc;
+  border-radius: 20%;
+  transition: 300ms;
+}
+
+/* When the checkbox is checked, add a blue background */
+.container input:checked ~ .checkmark {
+  background-color: var(--clr);
+  border-radius: 25%;
+  animation: pulse 200ms ease-in-out;
+}
+
+/* Create the checkmark/indicator (hidden when not checked) */
+.checkmark:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+/* Show the checkmark when checked */
+.container input:checked ~ .checkmark:after {
+  display: block;
+}
+
+/* Style the checkmark/indicator */
+.container .checkmark:after {
+  left: 0.45em;
+  top: 0.25em;
+  width: 0.25em;
+  height: 0.5em;
+  border: solid #e0e0e2;
+  border-width: 0 0.15em 0.15em 0;
+  transform: rotate(45deg);
+}
+
+@keyframes pulse {
+  0% {
+    rotate: 20deg;
+  }
+
+  50% {
+    rotate: -20deg;
+  }
+
+  100% {
+    rotate: 0;
+  }
+}
+
+.button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: rgb(20, 20, 20);
+  border: none;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.164);
+  cursor: pointer;
+  transition-duration: 0.3s;
+  overflow: hidden;
+  position: relative;
+  gap: 2px;
+}
+
+.svgIcon {
+  width: 10.5px;
+  transition-duration: 0.3s;
+}
+
+.svgIcon path {
+  fill: white;
+}
+
+.button:hover {
+  transition-duration: 0.3s;
+  background-color: rgb(255, 69, 69);
+  align-items: center;
+  gap: 0;
+}
+
+.bin-top {
+  transform-origin: bottom right;
+}
+.button:hover .bin-top {
+  transition-duration: 0.5s;
+  transform: rotate(160deg);
+}
+.editBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 20px;
+  border: none;
+  background-color: rgb(93, 93, 116);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.123);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.editBtn::before {
+  content: "";
+  width: 200%;
+  height: 200%;
+  background-color: rgb(102, 102, 141);
+  position: absolute;
+  z-index: 1;
+  transform: scale(0);
+  transition: all 0.3s;
+  border-radius: 50%;
+  filter: blur(10px);
+}
+
+.editBtn:hover::before {
+  transform: scale(1);
+}
+
+.editBtn:hover {
+  box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.336);
+}
+
+.editBtn svg {
+  height: 12px;
+  fill: white;
+  z-index: 3;
+  transition: all 0.2s;
+  transform-origin: bottom;
+}
+
+.editBtn:hover svg {
+  transform: rotate(-15deg) translateX(5px);
+}
+
+.editBtn::after {
+  content: "";
+  width: 19px;
+  height: 1.5px;
+  position: absolute;
+  bottom: 9px;
+  left: -5px;
+  background-color: white;
+  border-radius: 2px;
+  z-index: 2;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.5s ease-out;
+}
+
+.editBtn:hover::after {
+  transform: scaleX(1);
+  left: 0px;
+  transform-origin: right;
+}
+
+.button1 {
+  width: 150px;
+  height: 38px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  background: var(--color-blue-600);
+  border: none;
+  border-radius: 5px;
+  box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.button1,
+.button1 span {
+  transition: 200ms;
+}
+
+.button1 .text {
+  transform: translateX(35px);
+  color: white;
+  font-weight: bold;
+}
+
+.button1 .icon {
+  position: absolute;
+  border-left: 1px solid white;
+  transform: translateX(110px);
+  height: 30px;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button1 svg {
+  width: 15px;
+  fill: #eee;
+}
+
+.button1:hover {
+  background: var(--color-blue-600);
+}
+
+.button1:active {
+  background: var(--color-blue-600);
+}
+
+.button1:hover .text {
+  color: transparent;
+}
+
+.button1:hover .icon {
+  width: 150px;
+  border-left: none;
+  transform: translateX(0);
+}
+
+.button1:focus {
+  outline: none;
+}
+
+.button1:active .icon svg {
+  transform: scale(0.8);
+}
+
+.buttonSpan {
+  color: white;
+  margin: 100px;
+  font-size: 30px;
+  margin-bottom: 105px;
+}
+
+/* From Uiverse.io by Yaya12085 */
+.ui-like {
+  --icon-size: 24px;
+  --icon-secondary-color: rgb(255, 255, 255);
+  --icon-hover-color: rgb(211, 205, 205);
+  --icon-primary-color: rgb(230, 26, 26);
+  --icon-circle-border: 1px solid var(--icon-primary-color);
+  --icon-circle-size: 35px;
+  --icon-anmt-duration: 0.3s;
+}
+
+.ui-like input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.ui-like .like {
+  width: var(--icon-size);
+  height: auto;
+  fill: var(--icon-secondary-color);
+  cursor: pointer;
+  -webkit-transition: 0.2s;
+  -o-transition: 0.2s;
+  transition: 0.2s;
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  justify-content: center;
+  -webkit-box-align: center;
+  -ms-flex-align: center;
+  align-items: center;
+  position: relative;
+  -webkit-transform-origin: top;
+  -ms-transform-origin: top;
+  transform-origin: top;
+}
+
+.like::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  -webkit-box-shadow: 0 30px 0 -4px var(--icon-primary-color),
+    30px 0 0 -4px var(--icon-primary-color),
+    0 -30px 0 -4px var(--icon-primary-color),
+    -30px 0 0 -4px var(--icon-primary-color),
+    -22px 22px 0 -4px var(--icon-primary-color),
+    -22px -22px 0 -4px var(--icon-primary-color),
+    22px -22px 0 -4px var(--icon-primary-color),
+    22px 22px 0 -4px var(--icon-primary-color);
+  box-shadow: 0 30px 0 -4px var(--icon-primary-color),
+    30px 0 0 -4px var(--icon-primary-color),
+    0 -30px 0 -4px var(--icon-primary-color),
+    -30px 0 0 -4px var(--icon-primary-color),
+    -22px 22px 0 -4px var(--icon-primary-color),
+    -22px -22px 0 -4px var(--icon-primary-color),
+    22px -22px 0 -4px var(--icon-primary-color),
+    22px 22px 0 -4px var(--icon-primary-color);
+  border-radius: 50%;
+  -webkit-transform: scale(0);
+  -ms-transform: scale(0);
+  transform: scale(0);
+}
+
+.like::before {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: var(--icon-circle-border);
+  opacity: 0;
+}
+
+/* actions */
+
+.ui-like:hover .like {
+  fill: var(--icon-hover-color);
+}
+
+.ui-like input:checked + .like::after {
+  -webkit-animation: circles var(--icon-anmt-duration)
+    cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  animation: circles var(--icon-anmt-duration)
+    cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  -webkit-animation-delay: var(--icon-anmt-duration);
+  animation-delay: var(--icon-anmt-duration);
+}
+
+.ui-like input:checked + .like {
+  fill: var(--icon-primary-color);
+  -webkit-animation: like var(--icon-anmt-duration) forwards;
+  animation: like var(--icon-anmt-duration) forwards;
+  -webkit-transition-delay: 0.3s;
+  -o-transition-delay: 0.3s;
+  transition-delay: 0.3s;
+}
+
+.ui-like input:checked + .like::before {
+  -webkit-animation: circle var(--icon-anmt-duration)
+    cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  animation: circle var(--icon-anmt-duration)
+    cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  -webkit-animation-delay: var(--icon-anmt-duration);
+  animation-delay: var(--icon-anmt-duration);
+}
+
+@-webkit-keyframes like {
+  50% {
+    -webkit-transform: scaleY(0.6);
+    transform: scaleY(0.6);
+  }
+
+  100% {
+    -webkit-transform: scaleY(1);
+    transform: scaleY(1);
+  }
+}
+
+@keyframes like {
+  50% {
+    -webkit-transform: scaleY(0.6);
+    transform: scaleY(0.6);
+  }
+
+  100% {
+    -webkit-transform: scaleY(1);
+    transform: scaleY(1);
+  }
+}
+
+@-webkit-keyframes circle {
+  from {
+    width: 0;
+    height: 0;
+    opacity: 0;
+  }
+
+  90% {
+    width: var(--icon-circle-size);
+    height: var(--icon-circle-size);
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes circle {
+  from {
+    width: 0;
+    height: 0;
+    opacity: 0;
+  }
+
+  90% {
+    width: var(--icon-circle-size);
+    height: var(--icon-circle-size);
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@-webkit-keyframes circles {
+  from {
+    -webkit-transform: scale(0);
+    transform: scale(0);
+  }
+
+  40% {
+    opacity: 1;
+  }
+
+  to {
+    -webkit-transform: scale(0.8);
+    transform: scale(0.8);
+    opacity: 0;
+  }
+}
+
+@keyframes circles {
+  from {
+    -webkit-transform: scale(0);
+    transform: scale(0);
+  }
+
+  40% {
+    opacity: 1;
+  }
+
+  to {
+    -webkit-transform: scale(0.8);
+    transform: scale(0.8);
+    opacity: 0;
+  }
+}
+
+/* From Uiverse.io by philipo30 */
+.delete-button {
+  position: relative;
+  padding: 0.5em;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1em;
+  transition: transform 0.2s ease;
+}
+
+.trash-svg {
+  width: 2em;
+  height: 2em;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  overflow: visible;
+}
+
+#lid-group {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.delete-button:hover #lid-group {
+  transform: rotate(-28deg) translateY(2px);
+}
+
+.delete-button:active #lid-group {
+  transform: rotate(-12deg) scale(0.98);
+}
+
+.delete-button:hover .trash-svg {
+  transform: scale(1.08) rotate(3deg);
+}
+
+.delete-button:active .trash-svg {
+  transform: scale(0.96) rotate(-1deg);
+}
+
+/* From Uiverse.io by abrahamcalsin */
+.btn {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 5px;
+  background: #183153;
+  font-family: "Montserrat", sans-serif;
+  box-shadow: 0px 6px 24px 0px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  cursor: pointer;
+  border: none;
+}
+
+.btn:after {
+  content: " ";
+  width: 0%;
+  height: 100%;
+  background: #ffd401;
+  position: absolute;
+  transition: all 0.4s ease-in-out;
+  right: 0;
+}
+
+.btn:hover::after {
+  right: auto;
+  left: 0;
+  width: 100%;
+}
+
+.btn span {
+  text-align: center;
+  text-decoration: none;
+  width: 100%;
+  padding: 18px 25px;
+  color: #fff;
+  font-size: 1.125em;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  z-index: 20;
+  transition: all 0.3s ease-in-out;
+}
+
+.btn:hover span {
+  color: #183153;
+  animation: scaleUp 0.3s ease-in-out;
+}
+
+@keyframes scaleUp {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(0.95);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* From Uiverse.io by javierBarroso */
+.button {
+  position: relative;
+  width: 2em;
+  height: 2em;
+  border: none;
+  background: var(--color-red-400);
+  border-radius: 5px;
+  transition: background 0.5s;
+}
+
+.X {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1em;
+  height: 1.5px;
+  background-color: rgb(255, 255, 255);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.Y {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1em;
+  height: 1.5px;
+  background-color: #fff;
+  transform: translateX(-50%) rotate(-45deg);
+}
+
+.button:hover {
+  background-color: rgb(211, 21, 21);
+}
+
+.button:active {
+  background-color: rgb(130, 0, 0);
+}
+
+.button:hover > .close {
+  animation: close 0.2s forwards 0.25s;
+}
+
+@keyframes close {
+  100% {
+    opacity: 1;
+  }
+}
+/* From Uiverse.io by JulanDeAlb */
+.hamburger {
+  cursor: pointer;
+}
+
+.hamburger input {
+  display: none;
+}
+
+.hamburger svg {
+  /* The size of the SVG defines the overall size */
+  height: 2.5em;
+  /* Define the transition for transforming the SVG */
+  transition: transform 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.line {
+  fill: none;
+  stroke: white;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1;
+  /* Define the transition for transforming the Stroke */
+  transition: stroke-dasharray 600ms cubic-bezier(0.4, 0, 0.2, 1),
+    stroke-dashoffset 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.line-top-bottom {
+  stroke-dasharray: 12 63;
+}
+
+.hamburger input:checked + svg {
+  transform: rotate(-45deg);
+}
+
+.hamburger input:checked + svg .line-top-bottom {
+  stroke-dasharray: 20 300;
+  stroke-dashoffset: -32.42;
+}
+
+.button2 {
+  position: relative;
+  cursor: pointer;
+  background-color: transparent;
+  transition: all 0.2s ease;
+}
+
+.button2:before,
+.button2:after {
+  position: absolute;
+  content: "";
+  width: 150%;
+  left: 50%;
+  height: 100%;
+  transform: translateX(-50%);
+  z-index: -1000;
+  background-repeat: no-repeat;
+}
+
+.button2:active::before {
+  transform: scale(0.96);
+  top: -70%;
+  background-image: radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, transparent 20%, #1a1b2c 20%, transparent 30%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, transparent 10%, #1a1b2c 15%, transparent 20%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%),
+    radial-gradient(circle, #1a1b2c 20%, transparent 20%);
+  background-size: 10% 10%, 20% 20%, 15% 15%, 20% 20%, 18% 18%, 10% 10%, 15% 15%,
+    10% 10%, 18% 18%;
+  background-position: 50% 120%;
+  animation: greentopBubbles 0.6s ease;
+}
+
+@keyframes greentopBubbles {
+  0% {
+    background-position: 5% 90%, 10% 90%, 10% 90%, 15% 90%, 25% 90%, 25% 90%,
+      40% 90%, 55% 90%, 70% 90%;
+  }
+
+  50% {
+    background-position: 0% 80%, 0% 20%, 10% 40%, 20% 0%, 30% 30%, 22% 50%,
+      50% 50%, 65% 20%, 90% 30%;
+  }
+
+  100% {
+    background-position: 0% 70%, 0% 10%, 10% 30%, 20% -10%, 30% 20%, 22% 40%,
+      50% 40%, 65% 10%, 90% 20%;
+    background-size: 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%;
+  }
+}
+
+.button2:active::after {
+  bottom: -70%;
+  background-image: radial-gradient(circle, #7d2ae8 20%, transparent 20%),
+    radial-gradient(circle, #7d2ae8 20%, transparent 20%),
+    radial-gradient(circle, transparent 10%, #7d2ae8 15%, transparent 20%),
+    radial-gradient(circle, #7d2ae8 20%, transparent 20%),
+    radial-gradient(circle, #7d2ae8 20%, transparent 20%),
+    radial-gradient(circle, #7d2ae8 20%, transparent 20%),
+    radial-gradient(circle, #7d2ae8 20%, transparent 20%);
+  background-size: 15% 15%, 20% 20%, 18% 18%, 20% 20%, 15% 15%, 20% 20%, 18% 18%;
+  background-position: 50% 0%;
+  animation: greenbottomBubbles 0.6s ease;
+}
+
+@keyframes greenbottomBubbles {
+  0% {
+    background-position: 10% -10%, 30% 10%, 55% -10%, 70% -10%, 85% -10%,
+      70% -10%, 70% 0%;
+  }
+
+  50% {
+    background-position: 0% 80%, 20% 80%, 45% 60%, 60% 100%, 75% 70%, 95% 60%,
+      105% 0%;
+  }
+
+  100% {
+    background-position: 0% 90%, 20% 90%, 45% 70%, 60% 110%, 75% 80%, 95% 70%,
+      110% 10%;
+    background-size: 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%;
+  }
+}
+
+/* The switch - the box around the slider */
+.switch {
+  font-size: 17px;
+  position: relative;
+  display: inline-block;
+  width: 3.5em;
+  height: 2em;
+}
+
+/* Hide default HTML checkbox */
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* The slider */
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  border: 2px solid #414141;
+  border-radius: 50px;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 1.4em;
+  width: 1.4em;
+  left: 0.2em;
+  bottom: 0.2em;
+  background-color: white;
+  border-radius: inherit;
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.switch input:checked + .slider {
+  box-shadow: 0 0 20px rgba(9, 117, 241, 0.8);
+  border: 2px solid #0974f1;
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(1.5em);
+}
+
+/* From Uiverse.io by SchawnnahJ */
+.loader {
+  position: relative;
+  width: 2.5em;
+  height: 2.5em;
+  transform: rotate(165deg);
+}
+
+.loader:before,
+.loader:after {
+  content: "";
+  display: block;
+  width: 0.3em;
+  height: 0.3em;
+  border-radius: 0.25em;
+  transform: translate(-50%, -50%);
+}
+
+.loader:before {
+  animation: before8 2s infinite;
+}
+
+.loader:after {
+  animation: after6 2s infinite;
+}
+
+@keyframes before8 {
+  0% {
+    width: 0.3em;
+    box-shadow: 1em -0.5em rgba(225, 20, 98, 0.75),
+      -1em 0.5em rgba(111, 202, 220, 0.75);
+  }
+
+  35% {
+    width: 2.5em;
+    box-shadow: 0 -0.5em rgba(225, 20, 98, 0.75),
+      0 0.5em rgba(111, 202, 220, 0.75);
+  }
+
+  70% {
+    width: 0.5em;
+    box-shadow: -1em -0.5em rgba(225, 20, 98, 0.75),
+      1em 0.5em rgba(111, 202, 220, 0.75);
+  }
+
+  100% {
+    box-shadow: 1em -0.5em rgba(225, 20, 98, 0.75),
+      -1em 0.5em rgba(111, 202, 220, 0.75);
+  }
+}
+
+@keyframes after6 {
+  0% {
+    height: 0.5em;
+    box-shadow: 0.5em 1em rgba(61, 184, 143, 0.75),
+      -0.5em -1em rgba(233, 169, 32, 0.75);
+  }
+
+  35% {
+    height: 2.5em;
+    box-shadow: 0.5em 0 rgba(61, 184, 143, 0.75),
+      -0.5em 0 rgba(233, 169, 32, 0.75);
+  }
+
+  70% {
+    height: 0.5em;
+    box-shadow: 0.5em -1em rgba(61, 184, 143, 0.75),
+      -0.5em 1em rgba(233, 169, 32, 0.75);
+  }
+
+  100% {
+    box-shadow: 0.5em 1em rgba(61, 184, 143, 0.75),
+      -0.5em -1em rgba(233, 169, 32, 0.75);
+  }
+}
+
+.loader {
+  top: calc(5% - 1.25em);
+  left: calc(5% - 1.25em);
+}
