@@ -371,185 +371,269 @@ Available parts data: ${resText}`,
           if (partNumber === "NOT FOUND") {
             throw new Error("No relevant part found for the given name");
           }
-          let analogs = [];
 
-          const scrapeRosskoResponse = await fetch(proxyRosskoUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ partNumber, partName }),
-          });
-          const scrapeRosskoData = await scrapeRosskoResponse.json();
+          // after you have: baseUrl, partNumber, partName, vin
+          const proxyRosskoUrl = `${baseUrl}/api/py/link`;
+          const proxyAlatradeUrl = `${baseUrl}/api/py/alatrade`;
+          const proxyAlatradeAuthUrl = `${baseUrl}/api/py/alatrade_auth`;
 
-          if (!scrapeRosskoResponse.ok || scrapeRosskoData.error) {
-            throw new Error(
-              scrapeRosskoData.error || "Scraping Rossko API returned an error"
+          // ── helpers ───────────────────────────────────────────────────────────────────
+          const fetchWithTimeout = (url, opts = {}, ms = 20000) => {
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), ms);
+            return fetch(url, { ...opts, signal: ctl.signal }).finally(() =>
+              clearTimeout(t)
             );
+          };
+
+          const normalize = (s) => (s ?? "").toString().trim().toLowerCase();
+
+          function mergeStocks(a = [], b = []) {
+            // flatten + remove obvious dupes by (place, partPrice, delivery.start, delivery.end)
+            const keyOf = (s) =>
+              `${normalize(s.place)}|${s.partPrice}|${
+                s.delivery?.start ?? ""
+              }|${s.delivery?.end ?? ""}`;
+            const seen = new Set();
+            const out = [];
+            for (const s of [...a, ...b]) {
+              const k = keyOf(s);
+              if (!seen.has(k)) {
+                seen.add(k);
+                out.push(s);
+              }
+            }
+            return out;
           }
 
-          if (scrapeRosskoData.analogs.length < 1) {
-            let alatrade_data = await Alatrade.findOne({});
-
-            if (!alatrade_data) {
-              const scrapeAlatradeAuthResponse = await fetch(
-                proxyAlatradeAuthUrl,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
+          // map Rossko payload into common format (with per-item `source`)
+          const mapRossko = (d) => {
+            const original = d?.products?.[0]
+              ? {
+                  name: d.products[0].name,
+                  brand: d.products[0].brand,
+                  guid: d.products[0].id,
+                  article: d.products[0].article,
                 }
-              );
-              const scrapeAlatradeAuthData =
-                await scrapeAlatradeAuthResponse.json();
+              : null;
 
-              const newAlatrade = new Alatrade({
-                ci_session: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.expires,
-                },
-                rem_id: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.expires,
-                },
-              });
-
-              await newAlatrade.save();
-
-              alatrade_data = {
-                ci_session: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.expires,
-                },
-                rem_id: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.expires,
-                },
-              };
-            } else if (
-              alatrade_data.ci_session.expires <= new Date() &&
-              alatrade_data.rem_id.expires <= new Date()
-            ) {
-              const scrapeAlatradeAuthResponse = await fetch(
-                proxyAlatradeAuthUrl,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                }
-              );
-              const scrapeAlatradeAuthData =
-                await scrapeAlatradeAuthResponse.json();
-
-              await Alatrade.findOneAndUpdate(
-                {},
-                {
-                  ci_session: {
-                    value: scrapeAlatradeAuthData?.auth_data?.find(
-                      (c) => c.name === "ci_sessions"
-                    )?.value,
-                    expires: scrapeAlatradeAuthData?.auth_data?.find(
-                      (c) => c.name === "ci_sessions"
-                    )?.expires,
-                  },
-                  rem_id: {
-                    value: scrapeAlatradeAuthData?.auth_data?.find(
-                      (c) => c.name === "REMMEID"
-                    )?.value,
-                    expires: scrapeAlatradeAuthData?.auth_data?.find(
-                      (c) => c.name === "REMMEID"
-                    )?.expires,
-                  },
-                },
-                { new: true }
-              );
-
-              alatrade_data = {
-                ci_session: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "ci_sessions"
-                  )?.expires,
-                },
-                rem_id: {
-                  value: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.value,
-                  expires: scrapeAlatradeAuthData?.auth_data?.find(
-                    (c) => c.name === "REMMEID"
-                  )?.expires,
-                },
-              };
-            }
-
-            console.log("Using Alatrade auth data:", alatrade_data);
-
-            const scrapeAlatradeResponse = await fetch(proxyAlatradeUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                partNumber: partNumber,
-                partName: partName,
-                ci_session: alatrade_data["ci_session"].value,
-                rem_id: alatrade_data["rem_id"].value,
-              }),
-            });
-            const scrapeAlatradeData = await scrapeAlatradeResponse.json();
-
-            if (!scrapeAlatradeResponse.ok || scrapeAlatradeData.error) {
-              throw new Error(
-                scrapeAlatradeData.error || "Scraping API returned an error"
-              );
-            }
-
-            analogs = scrapeAlatradeData.analogs.map((item) => ({
-              original_id: item.RVALUE,
-              article: item.PIN,
-              brand: item.BRAND,
-              name: item.NAME,
-              guid: "",
-              pictures: item.IMAGES_FULL,
-              stocks: {
-                partPrice: item.PRICER1,
-                place: item.SNAME,
-                delivery: {
-                  end: item.DLVDT,
-                  start: item.DLVDT,
-                },
-              },
-            }));
-          } else {
-            analogs = scrapeRosskoData.analogs.map((item) => ({
+            const analogs = (d?.analogs ?? []).map((item) => ({
+              source: "rossko",
               original_id: item.original_id,
               article: item.article,
               brand: item.brand,
               name: item.name,
               guid: item.guid,
-              stocks: item.stocks.map((stock) => ({
+              pictures: item.pictures ?? [], // usually empty for Rossko; keep field for uniformity
+              stocks: (item.stocks ?? []).map((stock) => ({
                 partPrice: stock.basePrice,
                 place: stock.name,
                 delivery: {
-                  end: stock.tariffDeliveryTimingWithTimezone.end,
-                  start: stock.tariffDeliveryTimingWithTimezone.start,
+                  start: stock.tariffDeliveryTimingWithTimezone?.start,
+                  end: stock.tariffDeliveryTimingWithTimezone?.end,
                 },
               })),
             }));
+
+            return { original, analogs };
+          };
+
+          // map Alatrade payload into common format (with per-item `source`)
+          const mapAlatrade = (d) => {
+            const analogs = (d?.analogs ?? []).map((item) => ({
+              source: "alatrade",
+              original_id: item.RVALUE,
+              article: item.PIN,
+              brand: item.BRAND,
+              name: item.NAME,
+              guid: "",
+              pictures: item.IMAGES_FULL ?? [],
+              stocks: [
+                {
+                  partPrice: item.PRICER1,
+                  place: item.SNAME,
+                  delivery: { start: item.DLVDT, end: item.DLVDT },
+                },
+              ],
+            }));
+            return { original: null, analogs };
+          };
+
+          // get/refresh Alatrade cookies in parallel with Rossko (fast)
+          async function ensureAlatradeAuth() {
+            let alatrade = await Alatrade.findOne({}).lean();
+            const expired = (expires) => {
+              if (!expires) return true;
+              const d = new Date(expires);
+              if (!Number.isFinite(+d)) return true;
+              const exUTC = Date.UTC(
+                d.getUTCFullYear(),
+                d.getUTCMonth(),
+                d.getUTCDate()
+              );
+              const now = new Date();
+              const nowUTC = Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate()
+              );
+              return exUTC < nowUTC;
+            };
+            const needRefresh =
+              !alatrade ||
+              expired(alatrade?.ci_session?.expires) ||
+              expired(alatrade?.rem_id?.expires);
+
+            if (needRefresh) {
+              const r = await fetchWithTimeout(proxyAlatradeAuthUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+              const data = await r.json();
+              const next = {
+                ci_session: {
+                  value: data?.auth_data?.find((c) => c.name === "ci_sessions")
+                    ?.value,
+                  expires: data?.auth_data?.find(
+                    (c) => c.name === "ci_sessions"
+                  )?.expires,
+                },
+                rem_id: {
+                  value: data?.auth_data?.find((c) => c.name === "REMMEID")
+                    ?.value,
+                  expires: data?.auth_data?.find((c) => c.name === "REMMEID")
+                    ?.expires,
+                },
+              };
+              alatrade
+                ? (alatrade = await Alatrade.findOneAndUpdate({}, next, {
+                    new: true,
+                    lean: true,
+                  }))
+                : (alatrade =
+                    (await Alatrade.create(next)).toObject?.() ?? next);
+            }
+
+            return {
+              ci: alatrade.ci_session.value,
+              rem: alatrade.rem_id.value,
+            };
           }
 
+          // ── run both vendors concurrently ─────────────────────────────────────────────
+          const alatradeTokenPromise = ensureAlatradeAuth();
+
+          const rosskoPromise = (async () => {
+            const r = await fetchWithTimeout(proxyRosskoUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ partNumber, partName }),
+            });
+            if (!r.ok) throw new Error(`Rossko HTTP ${r.status}`);
+            return r.json();
+          })();
+
+          const alatradePromise = (async () => {
+            const { ci, rem } = await alatradeTokenPromise;
+            const r = await fetchWithTimeout(proxyAlatradeUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                partNumber,
+                partName,
+                ci_session: ci,
+                rem_id: rem,
+              }),
+            });
+            if (!r.ok) throw new Error(`Alatrade HTTP ${r.status}`);
+            return r.json();
+          })();
+
+          const [rosskoSettled, alatradeSettled] = await Promise.allSettled([
+            rosskoPromise,
+            alatradePromise,
+          ]);
+
+          const rossko =
+            rosskoSettled.status === "fulfilled"
+              ? mapRossko(rosskoSettled.value)
+              : { original: null, analogs: [] };
+          const alatrade =
+            alatradeSettled.status === "fulfilled"
+              ? mapAlatrade(alatradeSettled.value)
+              : { original: null, analogs: [] };
+
+          // if Rossko returned an original product, prefer it for chatData.original
+          let original = rossko.original ??
+            alatrade.original /* normally null */ ?? {
+              name: partName,
+              brand: "",
+              guid: "",
+              article: partNumber,
+            };
+
+          // ── combine + dedupe analogs from BOTH sources ───────────────────────────────
+          const combined = [...rossko.analogs, ...alatrade.analogs];
+
+          // key preference: article > (brand+name) when article missing
+          const keyOf = (a) => {
+            if (a.article && a.brand)
+              return `a:${normalize(a.article)}|${normalize(a.brand)}`;
+            if (a.article) return `a:${normalize(a.article)}`;
+            if (a.brand && a.name)
+              return `bn:${normalize(a.brand)}|${normalize(a.name)}`;
+            return `n:${normalize(a.name)}`; // last resort
+          };
+
+          const mergedMap = new Map();
+          /**
+           * final analog shape:
+           * {
+           *   article, brand, name, guid,
+           *   pictures: string[],  // union from all sources
+           *   stocks: Array<{ partPrice, place, delivery: {start, end} }>,
+           *   sources: string[]    // e.g., ["rossko","alatrade"]
+           * }
+           */
+          for (const item of combined) {
+            const k = keyOf(item);
+            const prev = mergedMap.get(k);
+            if (!prev) {
+              mergedMap.set(k, {
+                article: item.article ?? null,
+                brand: item.brand ?? null,
+                name: item.name ?? null,
+                guid: item.guid ?? null,
+                pictures: Array.isArray(item.pictures)
+                  ? [...item.pictures]
+                  : [],
+                stocks: Array.isArray(item.stocks) ? [...item.stocks] : [],
+                sources: [item.source],
+              });
+            } else {
+              // prefer non-empty fields
+              prev.article ||= item.article;
+              prev.brand ||= item.brand;
+              prev.name ||= item.name;
+              prev.guid ||= item.guid;
+
+              // merge arrays
+              if (Array.isArray(item.pictures) && item.pictures.length) {
+                const set = new Set([
+                  ...(prev.pictures ?? []),
+                  ...item.pictures,
+                ]);
+                prev.pictures = [...set];
+              }
+              prev.stocks = mergeStocks(prev.stocks, item.stocks ?? []);
+
+              // track all sources (unique)
+              if (!prev.sources.includes(item.source))
+                prev.sources.push(item.source);
+            }
+          }
+
+          const analogs = Array.from(mergedMap.values());
           const functionResponse = {
             partNumber: partNumber,
             analogs: analogs,
@@ -564,18 +648,8 @@ Available parts data: ${resText}`,
             content: JSON.stringify(functionResponse),
           });
 
-          console.log("Scrape functionResponse:", scrapeRosskoData.products[0]);
-
-          chatData = {
-            original: {
-              name: scrapeRosskoData.products[0].name,
-              brand: scrapeRosskoData.products[0].brand,
-              guid: scrapeRosskoData.products[0].id,
-              article: scrapeRosskoData.products[0].article,
-            },
-            analogs: analogs || [],
-          };
-
+          // now set the data you return / store
+          chatData = { original, analogs };
           finalResponse = await openai.chat.completions.create({
             model: "gpt-4o",
             messages,
@@ -766,7 +840,10 @@ Available parts data: ${resText}`,
         }
 
         console.log("Looking for pictures of:", partData);
-        console.log("Available chatData:", chatDoc.chatData[0].analogs);
+        console.log(
+          "Available chatData:",
+          chatDoc.chatData.map((c) => c.analogs)
+        );
 
         // ---------- helpers ----------
         const normalize = (s) =>
@@ -825,11 +902,10 @@ Available parts data: ${resText}`,
 
         // ---------- main: pick ONE best analog ----------
         const getBestAnalog = (
-          chatDoc,
+          analogs,
           partData,
           { strict = 0.95, fallback = 0.9 } = {}
         ) => {
-          const analogs = chatDoc?.chatData?.[0]?.analogs ?? [];
           let best = { product: null, score: 0 };
 
           for (const product of analogs) {
@@ -850,10 +926,14 @@ Available parts data: ${resText}`,
         };
 
         // ---------- usage ----------
-        const partNeeded = getBestAnalog(chatDoc, partData, {
-          strict: 0.95,
-          fallback: 0.9,
-        });
+        const partNeeded = getBestAnalog(
+          chatDoc.chatData.flatMap((item) => item.analogs),
+          partData,
+          {
+            strict: 0.95,
+            fallback: 0.9,
+          }
+        );
         // bestProduct is either the single most similar product (brand matched) or null
 
         console.log("Found part for pictures:", partNeeded);

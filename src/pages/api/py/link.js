@@ -125,53 +125,144 @@ export default async function handler(req, res) {
     );
 
     // Filter (unchanged)
-    const filterPartsFunc = (parts, partName) => {
+    function filterPartsFunc(parts, partName) {
       if (!Array.isArray(parts) || !partName || typeof partName !== "string") {
         return [];
       }
 
-      const normalize = (str) =>
-        str?.toLowerCase().trim().replace(/\s+/g, " ") || "";
+      const normalize = (s) =>
+        (s || "")
+          .toLowerCase()
+          .replace(/ё/g, "е")
+          .replace(/[^a-z0-9\u0430-\u044f\s-]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
 
-      const target = normalize(partName);
-      const targetTokens = target.split(" ").filter(Boolean);
+      const canonicalize = (s) => {
+        let t = " " + s + " ";
+        if (
+          /\bрадиатор\b/.test(t) &&
+          (/\bосновн/.test(t) ||
+            /\bохлажд/.test(t) ||
+            /\bсистем[аы]\s+охлажден/.test(t))
+        ) {
+          t = t.replace(
+            /\bрадиатор\b[^\S\r\n]*(?:двигателя|охлаждения|охлаждающей|основной)?/g,
+            " радиатор системы охлаждения "
+          );
+        }
+        return normalize(t);
+      };
+
+      const ngrams = (s, n = 3) => {
+        s = " " + canonicalize(s) + " ";
+        if (s.length < n) return new Set([s]);
+        const set = new Set();
+        for (let i = 0; i <= s.length - n; i++) set.add(s.slice(i, i + n));
+        return set;
+      };
+
+      const jaccard = (aSet, bSet) => {
+        if (!aSet.size && !bSet.size) return 0;
+        let inter = 0;
+        for (const x of aSet) if (bSet.has(x)) inter++;
+        return inter / (aSet.size + bSet.size - inter || 1);
+      };
+
+      const levenshtein = (a, b, cap = 100) => {
+        a = canonicalize(a);
+        b = canonicalize(b);
+        if (a === b) return 0;
+        const m = a.length,
+          n = b.length;
+        if (Math.max(m, n) === 0) return 0;
+        if (Math.abs(m - n) > cap) return cap;
+
+        const dp = Array(n + 1)
+          .fill(0)
+          .map((_, j) => j);
+        for (let i = 1; i <= m; i++) {
+          let prev = dp[0];
+          dp[0] = i;
+          for (let j = 1; j <= n; j++) {
+            const temp = dp[j];
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+            prev = temp;
+          }
+        }
+        return Math.min(dp[n], cap);
+      };
+
+      const TARGET = canonicalize(partName);
+      const targetTokens = TARGET.split(" ").filter(Boolean);
+      const targetNgrams = ngrams(TARGET, 3);
+
+      const STOP = new Set([
+        "для",
+        "в",
+        "и",
+        "на",
+        "с",
+        "стд",
+        "комплект",
+        "оригинал",
+        "качество",
+        "левый",
+        "правый",
+        "передний",
+        "задний",
+      ]);
+
+      const simplifyTokens = (arr) => arr.filter((t) => !STOP.has(t));
+
+      const scorePair = (candidateName) => {
+        const C = canonicalize(candidateName);
+        if (!C) return 0;
+        if (C === TARGET) return 100;
+        if (C.includes(TARGET) || TARGET.includes(C)) return 92;
+
+        const ngSim = jaccard(targetNgrams, ngrams(C, 3));
+        const candTokens = simplifyTokens(C.split(" ").filter(Boolean));
+        const tt = new Set(simplifyTokens(targetTokens));
+        let common = 0;
+        for (const t of candTokens) if (tt.has(t)) common++;
+        const tokenOverlap =
+          common / Math.max(1, Math.max(tt.size, candTokens.length));
+        const firstBoost =
+          targetTokens[0] && candTokens[0] && targetTokens[0] === candTokens[0]
+            ? 0.08
+            : 0;
+        const lv = levenshtein(TARGET, C, 60);
+        const lvSim = Math.max(0, 1 - lv / Math.max(6, TARGET.length));
+
+        let score =
+          70 * ngSim + 18 * tokenOverlap + 7 * lvSim + 100 * firstBoost;
+        score = Math.max(0, Math.min(99, Math.round(score)));
+        return score;
+      };
 
       return parts
         .map((part) => {
-          const partNameNormalized = normalize(part.name);
-          const partTokens = partNameNormalized.split(" ").filter(Boolean);
-
-          if (partNameNormalized === target) {
-            return { ...part, __score: 100 };
+          const name = part.NAME || part.name || "";
+          const s = scorePair(name);
+          const article = normalize(part.article || part.ARTICLE || "");
+          let bonus = 0;
+          if (!name && article) {
+            const comp = article.replace(/[^a-z0-9]/g, "");
+            const inTarget = normalize(partName).replace(/[^a-z0-9]/g, "");
+            const shared =
+              comp && inTarget
+                ? inTarget.includes(comp) || comp.includes(inTarget)
+                : false;
+            if (shared) bonus = 10;
           }
-
-          if (
-            partNameNormalized.includes(target) ||
-            target.includes(partNameNormalized)
-          ) {
-            return { ...part, __score: 80 };
-          }
-
-          const commonTokens = partTokens.filter((token) =>
-            targetTokens.includes(token)
-          );
-          const tokenOverlap =
-            commonTokens.length /
-            Math.max(targetTokens.length, partTokens.length);
-
-          const firstTokenMatch = targetTokens[0] === partTokens[0] ? 0.2 : 0;
-
-          const score = Math.min(
-            79,
-            Math.floor((tokenOverlap + firstTokenMatch) * 70)
-          );
-
-          return { ...part, __score: score };
+          return { ...part, __score: s + bonus };
         })
-        .filter((item) => item.__score > 0)
+        .filter((x) => x.__score > 0)
         .sort((a, b) => b.__score - a.__score)
-        .map(({ __score, ...part }) => part);
-    };
+        .map(({ __score, ...rest }) => rest);
+    }
 
     const filteredProducts = filterPartsFunc(products, partName);
 

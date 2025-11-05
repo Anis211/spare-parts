@@ -32,6 +32,7 @@ const chatSchema = new mongoose.Schema(
                 },
               },
             ],
+            sources: [String],
           },
         ],
       },

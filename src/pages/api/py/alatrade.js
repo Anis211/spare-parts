@@ -2,9 +2,256 @@
 import { spawn } from "child_process";
 import path from "path";
 
-const MAX_ATTEMPTS = 3; // how many times to try if output is empty
-const RETRY_DELAY_MS = 500; // wait between attempts
+export const config = { api: { bodyParser: true } };
 
+const MAX_ATTEMPTS = 3;
+const TIMEOUT_MS = 120_000; // scraping often needs >30s
+const INITIAL_DELAY = 700;
+const BACKOFF = 1.7;
+
+// Pick python exe robustly (Windows dev vs Linux/macOS prod)
+function resolvePythonExe() {
+  if (process.env.PYTHON_EXE) return process.env.PYTHON_EXE;
+  if (process.platform === "win32") {
+    return path.join(process.cwd(), "python", "Scripts", "python.exe");
+  }
+  return "python3";
+}
+
+// Run one Python process once and return stdout (string)
+function runPythonOnce(args, { timeoutMs = TIMEOUT_MS } = {}) {
+  const pythonExecutable = resolvePythonExe();
+  const pyCwd = path.join(process.cwd(), "python");
+
+  return new Promise((resolve, reject) => {
+    const pr = spawn(pythonExecutable, ["-u", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: pyCwd, // so relative imports/files work as when you run it manually
+      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      windowsHide: true,
+    });
+
+    let stdoutData = "";
+    let stderrData = "";
+    let timedOut = false;
+
+    const killer = setTimeout(() => {
+      timedOut = true;
+      try {
+        pr.kill("SIGTERM");
+      } catch {}
+    }, timeoutMs);
+
+    pr.stdout.on("data", (chunk) => {
+      stdoutData += chunk.toString("utf8");
+    });
+    pr.stderr.on("data", (chunk) => {
+      stderrData += chunk.toString("utf8");
+      // Keep this log for debugging, but don't fail immediately—retry wrapper handles that
+      console.error("[Python stderr]:", chunk.toString("utf8"));
+    });
+
+    pr.on("error", (err) => {
+      clearTimeout(killer);
+      reject(new Error(`Failed to start Python: ${err.message}`));
+    });
+
+    pr.on("close", (code) => {
+      clearTimeout(killer);
+      if (timedOut) return reject(new Error("Python script timed out"));
+      if (code !== 0) {
+        return reject(
+          new Error(
+            (stderrData && stderrData.trim()) ||
+              `Python script exited with code ${code}`
+          )
+        );
+      }
+      resolve((stdoutData || "").trim());
+    });
+  });
+}
+
+// Try N times; parse JSON output
+async function runPythonJSONWithRetry(args, opts = {}) {
+  const {
+    attempts = MAX_ATTEMPTS,
+    timeoutMs = TIMEOUT_MS,
+    initialDelay = INITIAL_DELAY,
+    backoff = BACKOFF,
+    label = "python",
+  } = opts;
+
+  let lastErr;
+  let delay = initialDelay;
+
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      console.log(`[${label}] attempt ${i}/${attempts}`);
+      const out = await runPythonOnce(args, { timeoutMs });
+      if (!out) throw new Error("Empty output from Python script");
+      try {
+        // If your script prints logs + JSON, ensure it prints ONLY JSON.
+        // If not, you can try to parse the last JSON-looking line:
+        // const lastLine = out.split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
+        // return JSON.parse(lastLine);
+        return JSON.parse(out);
+      } catch (e) {
+        throw new Error("Invalid JSON output from Python script");
+      }
+    } catch (err) {
+      console.warn(`[${label}] failed attempt ${i}: ${err.message}`);
+      lastErr = err;
+      if (i < attempts) {
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.ceil(delay * backoff);
+      }
+    }
+  }
+
+  throw lastErr || new Error(`[${label}] failed after ${attempts} attempts`);
+}
+
+// ---------- your original filter ----------
+function filterPartsFunc(parts, partName) {
+  if (!Array.isArray(parts) || !partName || typeof partName !== "string") {
+    return [];
+  }
+
+  const normalize = (s) =>
+    (s || "")
+      .toLowerCase()
+      .replace(/ё/g, "е")
+      .replace(/[^a-z0-9\u0430-\u044f\s-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const canonicalize = (s) => {
+    let t = " " + s + " ";
+    if (
+      /\bрадиатор\b/.test(t) &&
+      (/\bосновн/.test(t) ||
+        /\bохлажд/.test(t) ||
+        /\bсистем[аы]\s+охлажден/.test(t))
+    ) {
+      t = t.replace(
+        /\bрадиатор\b[^\S\r\n]*(?:двигателя|охлаждения|охлаждающей|основной)?/g,
+        " радиатор системы охлаждения "
+      );
+    }
+    return normalize(t);
+  };
+
+  const ngrams = (s, n = 3) => {
+    s = " " + canonicalize(s) + " ";
+    if (s.length < n) return new Set([s]);
+    const set = new Set();
+    for (let i = 0; i <= s.length - n; i++) set.add(s.slice(i, i + n));
+    return set;
+  };
+
+  const jaccard = (aSet, bSet) => {
+    if (!aSet.size && !bSet.size) return 0;
+    let inter = 0;
+    for (const x of aSet) if (bSet.has(x)) inter++;
+    return inter / (aSet.size + bSet.size - inter || 1);
+  };
+
+  const levenshtein = (a, b, cap = 100) => {
+    a = canonicalize(a);
+    b = canonicalize(b);
+    if (a === b) return 0;
+    const m = a.length,
+      n = b.length;
+    if (Math.max(m, n) === 0) return 0;
+    if (Math.abs(m - n) > cap) return cap;
+
+    const dp = Array(n + 1)
+      .fill(0)
+      .map((_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      let prev = dp[0];
+      dp[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const temp = dp[j];
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+        prev = temp;
+      }
+    }
+    return Math.min(dp[n], cap);
+  };
+
+  const TARGET = canonicalize(partName);
+  const targetTokens = TARGET.split(" ").filter(Boolean);
+  const targetNgrams = ngrams(TARGET, 3);
+
+  const STOP = new Set([
+    "для",
+    "в",
+    "и",
+    "на",
+    "с",
+    "стд",
+    "комплект",
+    "оригинал",
+    "качество",
+    "левый",
+    "правый",
+    "передний",
+    "задний",
+  ]);
+
+  const simplifyTokens = (arr) => arr.filter((t) => !STOP.has(t));
+
+  const scorePair = (candidateName) => {
+    const C = canonicalize(candidateName);
+    if (!C) return 0;
+    if (C === TARGET) return 100;
+    if (C.includes(TARGET) || TARGET.includes(C)) return 92;
+
+    const ngSim = jaccard(targetNgrams, ngrams(C, 3));
+    const candTokens = simplifyTokens(C.split(" ").filter(Boolean));
+    const tt = new Set(simplifyTokens(targetTokens));
+    let common = 0;
+    for (const t of candTokens) if (tt.has(t)) common++;
+    const tokenOverlap =
+      common / Math.max(1, Math.max(tt.size, candTokens.length));
+    const firstBoost =
+      targetTokens[0] && candTokens[0] && targetTokens[0] === candTokens[0]
+        ? 0.08
+        : 0;
+    const lv = levenshtein(TARGET, C, 60);
+    const lvSim = Math.max(0, 1 - lv / Math.max(6, TARGET.length));
+
+    let score = 70 * ngSim + 18 * tokenOverlap + 7 * lvSim + 100 * firstBoost;
+    score = Math.max(0, Math.min(99, Math.round(score)));
+    return score;
+  };
+
+  return parts
+    .map((part) => {
+      const name = part.NAME || part.name || "";
+      const s = scorePair(name);
+      const article = normalize(part.article || part.ARTICLE || "");
+      let bonus = 0;
+      if (!name && article) {
+        const comp = article.replace(/[^a-z0-9]/g, "");
+        const inTarget = normalize(partName).replace(/[^a-z0-9]/g, "");
+        const shared =
+          comp && inTarget
+            ? inTarget.includes(comp) || comp.includes(inTarget)
+            : false;
+        if (shared) bonus = 10;
+      }
+      return { ...part, __score: s + bonus };
+    })
+    .filter((x) => x.__score > 0)
+    .sort((a, b) => b.__score - a.__score)
+    .map(({ __score, ...rest }) => rest);
+}
+
+// --------------- API handler ---------------
 export default async function handler(req, res) {
   const { partNumber, partName, ci_session, rem_id } =
     req.method === "POST" ? req.body : req.query;
@@ -14,164 +261,37 @@ export default async function handler(req, res) {
   }
 
   console.log("Started alatrade proxy for partNumber:", partNumber);
-  console.log("Received partNumber:", partNumber);
-  console.log("Received partName:", partName);
-  console.log("Received ci_session:", ci_session);
-  console.log("Received rem_id:", rem_id);
 
   try {
-    const pythonExecutable = path.join(
-      process.cwd(),
-      "python",
-      "Scripts",
-      "python.exe"
-    );
+    // Call your script directly (no broker). It must print pure JSON.
+    // Expecting: python/alatrade_analogs.py partNumber ci_session rem_id
     const scriptPath = path.join(
       process.cwd(),
       "python",
       "alatrade_analogs.py"
     );
-
-    const runPythonOnce = () =>
-      new Promise((resolve, reject) => {
-        const pr = spawn(pythonExecutable, [
-          scriptPath,
-          partNumber || "",
-          ci_session || "",
-          rem_id || "",
-        ]);
-
-        let stdoutData = "";
-        let stderrData = "";
-
-        pr.stdout.on("data", (data) => {
-          stdoutData += data.toString("utf8");
-          console.log("Python stdout data chunk:", data.toString("utf8"));
-        });
-
-        pr.stderr.on("data", (data) => {
-          const str = data.toString();
-          stderrData += str;
-          console.error("[Python stderr]:", str);
-        });
-
-        pr.on("close", (code) => {
-          const out = (stdoutData || "").trim();
-          if (code === 0) {
-            // If Python printed nothing, resolve with empty array (so caller can decide to retry)
-            if (!out) return resolve([]);
-            try {
-              const parsed = JSON.parse(out);
-              // Ensure array; if not, still return what we got
-              return resolve(Array.isArray(parsed) ? parsed : parsed ?? []);
-            } catch (e) {
-              console.error("Failed to parse Python output:", e);
-              console.error("The Failed Output:", out);
-              // treat as empty so the retry loop can try again
-              return resolve([]);
-            }
-          } else {
-            return reject({
-              error:
-                stderrData.trim() || `Python script exited with code ${code}`,
-            });
-          }
-        });
-
-        pr.on("error", (err) => {
-          console.error("Failed to start Python process:", err.message);
-          reject({ error: `Failed to start Python: ${err.message}` });
-        });
-
-        // Timeout guard per attempt
-        const t = setTimeout(() => {
-          try {
-            pr.kill("SIGTERM");
-          } catch {}
-          resolve([]); // treat as empty so we can retry
-        }, 30000);
-
-        pr.on("close", () => clearTimeout(t));
-      });
-
-    // Retry loop
-    let products = [];
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      products = await runPythonOnce();
-      console.log(
-        `Attempt ${attempt}/${MAX_ATTEMPTS} — Python returned ${
-          Array.isArray(products) ? products.length : 0
-        } items`
-      );
-      if (Array.isArray(products) && products.length > 0) break;
-      if (attempt < MAX_ATTEMPTS) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      }
-    }
-
-    // Filter by name/city (kept your logic)
-    const filterPartsFunc = (parts, partName) => {
-      if (!Array.isArray(parts) || !partName || typeof partName !== "string") {
-        return [];
-      }
-      const normalize = (str) =>
-        str?.toLowerCase().trim().replace(/\s+/g, " ") || "";
-      const target = normalize(partName);
-      const targetTokens = target.split(" ").filter(Boolean);
-
-      return parts
-        .map((part) => {
-          // your Python returns upper-case "NAME"; keep fallback to part.name
-          const partNameNormalized = normalize(part.NAME || part.name || "");
-          const partTokens = partNameNormalized.split(" ").filter(Boolean);
-
-          if (partNameNormalized === target) return { ...part, __score: 100 };
-          if (
-            partNameNormalized.includes(target) ||
-            target.includes(partNameNormalized)
-          )
-            return { ...part, __score: 80 };
-
-          const commonTokens = partTokens.filter((token) =>
-            targetTokens.includes(token)
-          );
-          const tokenOverlap =
-            commonTokens.length /
-            Math.max(targetTokens.length, partTokens.length || 1);
-          const firstTokenMatch =
-            targetTokens[0] &&
-            partTokens[0] &&
-            targetTokens[0] === partTokens[0]
-              ? 0.2
-              : 0;
-          const score = Math.min(
-            79,
-            Math.floor((tokenOverlap + firstTokenMatch) * 70)
-          );
-          return { ...part, __score: score };
-        })
-        .filter((item) => item.__score > 0)
-        .sort((a, b) => b.__score - a.__score)
-        .map(({ __score, ...part }) => part);
-    };
-
-    const filteredProducts = filterPartsFunc(products, partName).filter(
-      (product) => (product.SNAME || "").trim() === "Астана"
+    const products = await runPythonJSONWithRetry(
+      [
+        scriptPath,
+        partNumber || "",
+        ci_session || "",
+        rem_id || "",
+        partName || "",
+      ],
+      { label: "alatrade-analogs" }
     );
 
-    console.log("filtered: ", filteredProducts?.length ?? 0);
+    const filtered = filterPartsFunc(products, partName).filter(
+      (p) => (p.SNAME || "").trim() === "Астана"
+    );
+
     return res.status(200).json({
-      analogs: filteredProducts,
+      analogs: filtered,
       attempts: MAX_ATTEMPTS,
-      returned: products?.length ?? 0,
+      returned: Array.isArray(products) ? products.length : 0,
     });
   } catch (e) {
     console.error("Unexpected error in handler:", e);
-    if (e.error) {
-      return res
-        .status(500)
-        .json({ error: e.error || "Internal server error" });
-    }
     return res
       .status(500)
       .json({ error: e.message || "Internal server error" });
