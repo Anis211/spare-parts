@@ -49,43 +49,39 @@ const features = [
 
 const App = () => {
   const handleClick = async () => {
-    const proxyAlatradeUrl = `/api/py/alatrade`;
-    const proxyAlatradeAuthUrl = `/api/py/alatrade_auth`;
+    const proxyShatemAuthUrl = `/api/py/shatem_auth`;
+    const proxyShatemUrl = `/api/py/shatem`;
     const partNumber = "ELH4364";
     const partName = "Маслянный Фильтр";
+    const agreement = "KSAGR00684";
 
-    const scrapeAlatradeAuthResponse = await fetch(proxyAlatradeAuthUrl, {
+    const scrapeShatemAuthResponse = await fetch(proxyShatemAuthUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
-    const scrapeAlatradeAuthData = await scrapeAlatradeAuthResponse.json();
-    console.log(scrapeAlatradeAuthData);
-    console.log(
-      scrapeAlatradeAuthData?.auth_data?.find((c) => c.name === "ci_sessions")
-        ?.value
-    );
-    console.log(
-      scrapeAlatradeAuthData?.auth_data?.find((c) => c.name === "REMMEID")
-        ?.value
-    );
+    const scrapeShatemAuthData = await scrapeShatemAuthResponse.json();
+    console.log(scrapeShatemAuthData);
 
-    const scrapeAlatradeResponse = await fetch(proxyAlatradeUrl, {
+    const scrapeShatemResponse = await fetch(proxyShatemUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        partNumber: partNumber,
-        partName: partName,
-        ci_session: scrapeAlatradeAuthData?.auth_data?.find(
-          (c) => c.name === "ci_sessions"
+        partNumber,
+        partName,
+        agreement,
+        antiforgery: scrapeShatemAuthData.auth_data.find(
+          (c) => c.name === ".AspNetCore.Antiforgery.VyLW6ORzMgk"
         )?.value,
-        rem_id: scrapeAlatradeAuthData?.auth_data?.find(
-          (c) => c.name === "REMMEID"
+        x_access_token: scrapeShatemAuthData.auth_data.find(
+          (c) => c.name === "X-Access-Token"
+        )?.value,
+        x_refresh_token: scrapeShatemAuthData.auth_data.find(
+          (c) => c.name === "X-Refresh-Token"
         )?.value,
       }),
     });
-    const scrapeAlatradeData = await scrapeAlatradeResponse.json();
-
-    console.log(scrapeAlatradeData);
+    const scrapeShatemData = await scrapeShatemResponse.json();
+    console.log(scrapeShatemData);
   };
 
   return (
