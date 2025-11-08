@@ -255,13 +255,13 @@ export default async function handler(req, res) {
   }
 
   const {
-    partNumber, // == "number"
-    agreement, // e.g. "KSAGR00684"
-    partName, // human name to rank
-    antiforgery, // .AspNetCore.Antiforgery...
-    x_access_token, // JWT
-    x_refresh_token, // refresh
-    city = "Астана", // <—— NEW: filter city (default Astana)
+    partNumber,
+    agreement,
+    partName,
+    antiforgery,
+    x_access_token,
+    x_refresh_token,
+    city = "Астана",
   } = req.method === "POST" ? req.body : req.query;
 
   console.log(
@@ -287,15 +287,12 @@ export default async function handler(req, res) {
       { label: "shatem-search" }
     );
 
-    // Raw rows as returned by Python:
     const analogsRaw =
       (Array.isArray(data?.analogs_prices) && data.analogs_prices) ||
       (Array.isArray(data?.analogs_prices?.items) &&
         data.analogs_prices.items) ||
       [];
 
-    // --- Flatten by city: each price that matches `city` becomes an "offer" row
-    // We also project fields into names your filter expects: `name` and `article`
     const cityNorm = String(city || "").trim();
     const offers = [];
     for (const row of analogsRaw) {
@@ -305,10 +302,8 @@ export default async function handler(req, res) {
         const prCity = (pr?.city || "").trim();
         if (!cityNorm || prCity === cityNorm) {
           offers.push({
-            // fields to help filterPartsFunc:
             name: info.description || info.descriptionFormatted || "",
             article: info.article || info.itemNumber || "",
-            // keep original fields too (useful in UI)
             partInfo: info,
             priceId: pr.priceId,
             price: pr.price,
@@ -318,36 +313,18 @@ export default async function handler(req, res) {
             availability: pr.availability,
             location: pr.location,
             city: prCity,
-            type: pr.type, // Internal/External
+            type: pr.type,
             deliveryInfo: pr.deliveryInfo,
             minimumQuantity: pr.minimumQuantity,
           });
         }
       }
     }
-
-    // Fuzzy-rank by partName (if provided)
     const ranked = filterPartsFunc(offers, partName);
 
-    // Optional: sort by price asc, then by inventory desc
-    ranked.sort((a, b) => {
-      const pa = Number.isFinite(a.price) ? a.price : Number.MAX_SAFE_INTEGER;
-      const pb = Number.isFinite(b.price) ? b.price : Number.MAX_SAFE_INTEGER;
-      if (pa !== pb) return pa - pb;
-      return (b.inventory || 0) - (a.inventory || 0);
-    });
-
     return res.status(200).json({
-      searched_number: data?.searched_number ?? partNumber ?? "",
-      selected_part: data?.selected_part ?? null,
-      analogs: ranked, // <— flattened, city-filtered, ranked offers
-      analogs_raw: analogsRaw, // untouched raw for debugging
-      counts: {
-        rows_raw: Array.isArray(analogsRaw) ? analogsRaw.length : 0,
-        offers_city: offers.length,
-        analogs_filtered: ranked.length,
-      },
-      city: cityNorm,
+      analogs: ranked,
+      analogs_raw: analogsRaw,
       attempts: MAX_ATTEMPTS,
     });
   } catch (e) {

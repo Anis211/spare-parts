@@ -67,6 +67,7 @@ Output for scrape_website function results:
 - You must use name, brand, price (is the base_price in the stocks part), and stocks (name, tariffDeliveryTimingWithTimezone(make it user readable), quantity) from the stocks part, do not show the oe number, the links and the address like Akzhol 30 (just show the city, like in Astana or in Karaganda) to the client
 - Do not use chatData information in the output
 - Output the exact name prop you recieve from the scrape_website function
+- Output the whole set of items in the analogs given to you as a function answer (for example if in the array you have 8 items, you must to output all 8 of the items given to you, without any exceptions!!), but do now output the images of the products until the user asks you to do it
 
 Use order_parts function when:
 - The user wants to make an order
@@ -165,7 +166,7 @@ Every line break is sacred. Every space is intentional.
               partName1: {
                 type: "string",
                 description:
-                  "The part name to search for (it must to be translated to russian language) (if in user message is no part name at all return 'nothing' as the partName1)",
+                  "The part name to search for (it must to be translated to russian language, translate is perfectly accurate for example 'tie rod' is the 'рулевая тяга' it is not 'рулевой наконечник') (if in user message is no part name at all return 'nothing' as the partName1)",
               },
               vin: {
                 type: "string",
@@ -377,6 +378,11 @@ Available parts data: ${resText}`,
           const proxyAlatradeUrl = `${baseUrl}/api/py/alatrade`;
           const proxyAlatradeAuthUrl = `${baseUrl}/api/py/alatrade_auth`;
 
+          const proxyShatemUrl = `${baseUrl}/api/py/shatem`;
+          const proxyShatemAuthUrl = `${baseUrl}/api/py/shatem_auth`;
+
+          const SHATEM_AGREEMENT = "KSAGR00684";
+
           // ── helpers ───────────────────────────────────────────────────────────────────
           const fetchWithTimeout = (url, opts = {}, ms = 20000) => {
             const ctl = new AbortController();
@@ -459,6 +465,32 @@ Available parts data: ${resText}`,
             return { original: null, analogs };
           };
 
+          function mapShatem(d) {
+            const analogs = (d?.analogs ?? []).map((item) => ({
+              source: "shatem",
+              original_id: item.partInfo.id,
+              article: item.article,
+              brand: item.partInfo.tradeMarkName,
+              name: item.name,
+              guid: "",
+              pictures: [],
+              stocks: [
+                {
+                  partPrice: item.price,
+                  place: item.city,
+                  delivery: {
+                    start: item.deliveryInfo.deliveryDateTimes[0].deliveryDate,
+                    end: "",
+                  },
+                },
+              ],
+            }));
+
+            return {
+              analogs: analogs,
+            };
+          }
+
           // get/refresh Alatrade cookies in parallel with Rossko (fast)
           async function ensureAlatradeAuth() {
             let alatrade = await Alatrade.findOne({}).lean();
@@ -520,8 +552,33 @@ Available parts data: ${resText}`,
             };
           }
 
-          // ── run both vendors concurrently ─────────────────────────────────────────────
+          async function ensureShatemAuth() {
+            const r = await fetchWithTimeout(proxyShatemAuthUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            if (!r.ok) throw new Error(`Shatem auth HTTP ${r.status}`);
+            const data = await r.json();
+            const cookies = Array.isArray(data?.auth_data)
+              ? data.auth_data
+              : [];
+
+            const get = (name) =>
+              cookies.find((c) => c.name === name)?.value || "";
+
+            const antiforgery = get(".AspNetCore.Antiforgery.VyLW6ORzMgk");
+            const x_access_token = get("X-Access-Token");
+            const x_refresh_token = get("X-Refresh-Token");
+
+            if (!antiforgery || !x_access_token) {
+              throw new Error("Shatem auth is missing required cookies");
+            }
+            return { antiforgery, x_access_token, x_refresh_token };
+          }
+
+          // ── run all vendors concurrently ───────────────────────────────────────────
           const alatradeTokenPromise = ensureAlatradeAuth();
+          const shatemTokenPromise = ensureShatemAuth();
 
           const rosskoPromise = (async () => {
             const r = await fetchWithTimeout(proxyRosskoUrl, {
@@ -549,23 +606,51 @@ Available parts data: ${resText}`,
             return r.json();
           })();
 
-          const [rosskoSettled, alatradeSettled] = await Promise.allSettled([
-            rosskoPromise,
-            alatradePromise,
-          ]);
+          const shatemPromise = (async () => {
+            const { antiforgery, x_access_token, x_refresh_token } =
+              await shatemTokenPromise;
+
+            const r = await fetchWithTimeout(proxyShatemUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                partNumber,
+                agreement: SHATEM_AGREEMENT,
+                partName,
+                antiforgery,
+                x_access_token,
+                x_refresh_token,
+              }),
+            });
+            if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
+            return r.json();
+          })();
+
+          const [rosskoSettled, alatradeSettled, shatemSettled] =
+            await Promise.allSettled([
+              rosskoPromise,
+              alatradePromise,
+              shatemPromise,
+            ]);
 
           const rossko =
             rosskoSettled.status === "fulfilled"
               ? mapRossko(rosskoSettled.value)
               : { original: null, analogs: [] };
+
           const alatrade =
             alatradeSettled.status === "fulfilled"
               ? mapAlatrade(alatradeSettled.value)
               : { original: null, analogs: [] };
 
+          const shatem =
+            shatemSettled.status === "fulfilled"
+              ? mapShatem(shatemSettled.value)
+              : { original: null, analogs: [] };
+
           // if Rossko returned an original product, prefer it for chatData.original
           let original = rossko.original ??
-            alatrade.original /* normally null */ ?? {
+            alatrade.original ?? {
               name: partName,
               brand: "",
               guid: "",
@@ -573,7 +658,11 @@ Available parts data: ${resText}`,
             };
 
           // ── combine + dedupe analogs from BOTH sources ───────────────────────────────
-          const combined = [...rossko.analogs, ...alatrade.analogs];
+          const combined = [
+            ...rossko.analogs,
+            ...alatrade.analogs,
+            ...shatem.analogs,
+          ];
 
           // key preference: article > (brand+name) when article missing
           const keyOf = (a) => {
@@ -586,15 +675,6 @@ Available parts data: ${resText}`,
           };
 
           const mergedMap = new Map();
-          /**
-           * final analog shape:
-           * {
-           *   article, brand, name, guid,
-           *   pictures: string[],  // union from all sources
-           *   stocks: Array<{ partPrice, place, delivery: {start, end} }>,
-           *   sources: string[]    // e.g., ["rossko","alatrade"]
-           * }
-           */
           for (const item of combined) {
             const k = keyOf(item);
             const prev = mergedMap.get(k);

@@ -39,7 +39,7 @@ const chatSchema = new mongoose.Schema(
     ],
     chat: [
       {
-        text: { type: String, required: true, maxlength: 1000 },
+        text: { type: String, required: true, maxlength: 5000 },
         embedding: {
           type: [Number],
           validate: [

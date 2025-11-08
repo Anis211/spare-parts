@@ -51,8 +51,8 @@ const App = () => {
   const handleClick = async () => {
     const proxyShatemAuthUrl = `/api/py/shatem_auth`;
     const proxyShatemUrl = `/api/py/shatem`;
-    const partNumber = "ELH4364";
-    const partName = "Маслянный Фильтр";
+    const partNumber = "CRG-32";
+    const partName = "Тяга рулевая";
     const agreement = "KSAGR00684";
 
     const scrapeShatemAuthResponse = await fetch(proxyShatemAuthUrl, {

@@ -266,10 +266,6 @@ export default async function handler(req, res) {
 
     const filteredProducts = filterPartsFunc(products, partName);
 
-    console.log("filtered: ", filteredProducts);
-    console.log("products: ", products);
-    console.log("partName: ", partName);
-
     // Then, get analogs for the first product if available (RETRY)
     let analogs = [];
     if (products.length > 0 && products[0].id != null) {
