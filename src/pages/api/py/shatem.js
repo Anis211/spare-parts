@@ -30,7 +30,7 @@ function runPythonOnce(args, { timeoutMs = TIMEOUT_MS } = {}) {
       env: {
         ...process.env,
         PYTHONUNBUFFERED: "1",
-        PYTHONUTF8: "1", // force utf-8 on Windows/Python 3.7+
+        PYTHONUTF8: "1",
       },
       windowsHide: true,
     });
@@ -292,6 +292,7 @@ export default async function handler(req, res) {
       (Array.isArray(data?.analogs_prices?.items) &&
         data.analogs_prices.items) ||
       [];
+    const analogsMedia = data?.analogs_media;
 
     const cityNorm = String(city || "").trim();
     const offers = [];
@@ -325,6 +326,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       analogs: ranked,
       analogs_raw: analogsRaw,
+      analogs_media: analogsMedia,
       attempts: MAX_ATTEMPTS,
     });
   } catch (e) {

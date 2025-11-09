@@ -3,6 +3,7 @@ import { OpenAI } from "openai";
 import Chat from "@/models/Chat";
 import User from "@/models/User";
 import Alatrade from "@/models/Alatrade";
+import { getGrid } from "@/lib/gridfs";
 
 connectDB();
 
@@ -67,7 +68,7 @@ Output for scrape_website function results:
 - You must use name, brand, price (is the base_price in the stocks part), and stocks (name, tariffDeliveryTimingWithTimezone(make it user readable), quantity) from the stocks part, do not show the oe number, the links and the address like Akzhol 30 (just show the city, like in Astana or in Karaganda) to the client
 - Do not use chatData information in the output
 - Output the exact name prop you recieve from the scrape_website function
-- Output the whole set of items in the analogs given to you as a function answer (for example if in the array you have 8 items, you must to output all 8 of the items given to you, without any exceptions!!), but do now output the images of the products until the user asks you to do it
+- Output the whole set of items in the analogs given to you as a function answer (for example if in the array you have 8 items, you must output all 8 of the items given to you, without any exceptions!!), but do now output the images of the products until the user asks you to do it
 
 Use order_parts function when:
 - The user wants to make an order
@@ -284,10 +285,6 @@ Every line break is sacred. Every space is intentional.
         const baseUrl =
           process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
 
-        const proxyRosskoUrl = `${baseUrl}/api/py/link`;
-        const proxyAlatradeUrl = `${baseUrl}/api/py/alatrade`;
-        const proxyAlatradeAuthUrl = `${baseUrl}/api/py/alatrade_auth`;
-
         console.log(
           "User Images:",
           Array.isArray(userImages) ? userImages.length : 0
@@ -465,30 +462,76 @@ Available parts data: ${resText}`,
             return { original: null, analogs };
           };
 
-          function mapShatem(d) {
-            const analogs = (d?.analogs ?? []).map((item) => ({
-              source: "shatem",
-              original_id: item.partInfo.id,
-              article: item.article,
-              brand: item.partInfo.tradeMarkName,
-              name: item.name,
-              guid: "",
-              pictures: [],
-              stocks: [
-                {
-                  partPrice: item.price,
-                  place: item.city,
-                  delivery: {
-                    start: item.deliveryInfo.deliveryDateTimes[0].deliveryDate,
-                    end: "",
-                  },
-                },
-              ],
-            }));
+          async function saveToGridFS({ buffer, contentType, filename }) {
+            const { bucket } = await getGrid();
+            return new Promise((resolve, reject) => {
+              const upload = bucket.openUploadStream(filename, {
+                metadata: { contentType },
+              });
+              upload.on("error", reject);
+              upload.on("finish", () => resolve(upload.id)); // returns ObjectId
+              upload.end(buffer);
+            });
+          }
 
-            return {
-              analogs: analogs,
-            };
+          async function mapShatem(d) {
+            const analogs = await Promise.all(
+              (d?.analogs ?? []).map(async (item) => {
+                const analog_media_data = d?.analogs_media?.find(
+                  (media) =>
+                    media.article == item.article &&
+                    media.brand == item.partInfo.tradeMarkName
+                );
+
+                const rawList = Array.isArray(analog_media_data?.media)
+                  ? analog_media_data.media
+                  : [];
+
+                const pictures = await Promise.all(
+                  rawList.map(async (m, idx) => {
+                    try {
+                      const base64 = m.value.split(",")[1];
+                      const buffer = Buffer.from(base64, "base64");
+                      const contentType =
+                        m.value.match(/^data:(.*?);/)?.[1] || "image/jpeg";
+                      const filename = `${item.article}_${item.partInfo.tradeMarkName}_${idx}.jpg`;
+                      const id = await saveToGridFS({
+                        buffer,
+                        contentType,
+                        filename,
+                      });
+                      return `${baseUrl}/api/images/${id.toString()}`;
+                    } catch (e) {
+                      console.warn("GridFS save skipped:", e.message);
+                      return null;
+                    }
+                  })
+                );
+
+                return {
+                  source: "shatem",
+                  original_id: item.partInfo.id,
+                  article: item.article,
+                  brand: item.partInfo.tradeMarkName,
+                  name: item.name,
+                  guid: "",
+                  pictures: pictures.filter(Boolean),
+                  stocks: [
+                    {
+                      partPrice: item.price,
+                      place: item.city,
+                      delivery: {
+                        start:
+                          item.deliveryInfo.deliveryDateTimes[0].deliveryDate,
+                        end: "",
+                      },
+                    },
+                  ],
+                };
+              })
+            );
+
+            return { original: null, analogs }; // <- return an object like your other mappers
           }
 
           // get/refresh Alatrade cookies in parallel with Rossko (fast)
@@ -626,27 +669,29 @@ Available parts data: ${resText}`,
             return r.json();
           })();
 
-          const [rosskoSettled, alatradeSettled, shatemSettled] =
-            await Promise.allSettled([
-              rosskoPromise,
-              alatradePromise,
-              shatemPromise,
-            ]);
+          const emptyVendor = { original: null, analogs: [] };
+          const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
+          const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
+          const mapShatemP = (val) => mapShatem(val); // already async
 
-          const rossko =
-            rosskoSettled.status === "fulfilled"
-              ? mapRossko(rosskoSettled.value)
-              : { original: null, analogs: [] };
+          const [rossko, alatrade, shatem] = await Promise.all([
+            rosskoPromise.then(mapRosskoP).catch((e) => {
+              console.error("[rossko] failed:", e?.message || e);
+              return emptyVendor;
+            }),
+            alatradePromise.then(mapAlatradeP).catch((e) => {
+              console.error("[alatrade] failed:", e?.message || e);
+              return emptyVendor;
+            }),
+            shatemPromise.then(mapShatemP).catch((e) => {
+              console.error("[shatem] failed:", e?.message || e);
+              return emptyVendor;
+            }),
+          ]);
 
-          const alatrade =
-            alatradeSettled.status === "fulfilled"
-              ? mapAlatrade(alatradeSettled.value)
-              : { original: null, analogs: [] };
-
-          const shatem =
-            shatemSettled.status === "fulfilled"
-              ? mapShatem(shatemSettled.value)
-              : { original: null, analogs: [] };
+          console.log("rossko analogs:", rossko.analogs.length);
+          console.log("alatrade analogs:", alatrade.analogs.length);
+          console.log("shatem analogs:", shatem.analogs.length);
 
           // if Rossko returned an original product, prefer it for chatData.original
           let original = rossko.original ??
@@ -663,6 +708,8 @@ Available parts data: ${resText}`,
             ...alatrade.analogs,
             ...shatem.analogs,
           ];
+
+          console.log("combined: ", combined);
 
           // key preference: article > (brand+name) when article missing
           const keyOf = (a) => {
@@ -776,13 +823,10 @@ Available parts data: ${resText}`,
           );
         }
 
-        // Use the latest chatData (assuming it's an array; take last item)
         const chatData = chatDoc.chatData[chatDoc.chatData.length - 1];
-
-        // Combine original + analogs into one searchable list
         const allAvailableParts = [
           {
-            ...chatData.original, // ⚠️ Note: you have a typo here ("origianl")
+            ...chatData.original,
             name: chatData.original?.name,
             brand: chatData.original?.brand,
             article: chatData.original?.article,

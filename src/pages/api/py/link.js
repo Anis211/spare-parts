@@ -8,7 +8,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  console.log("Started proxy for partNumber:", partNumber);
+  console.log("Started rossko proxy for partNumber:", partNumber);
 
   try {
     const pythonExecutable = path.join(

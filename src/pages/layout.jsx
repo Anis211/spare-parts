@@ -4,7 +4,7 @@ import useUser from "@/zustand/user";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, useRef } from "react";
 import { useRouter } from "next/router";
-import { Cross, ImageDown, BadgeX } from "lucide-react";
+import { ImageDown, BadgeX } from "lucide-react";
 
 export default function Layout({ children }) {
   const router = useRouter();
