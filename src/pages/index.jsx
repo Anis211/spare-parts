@@ -1,6 +1,5 @@
 import React from "react";
 import { motion } from "framer-motion";
-import useUser from "@/zustand/user";
 
 const services = [
   {

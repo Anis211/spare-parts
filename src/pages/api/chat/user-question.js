@@ -672,7 +672,7 @@ Available parts data: ${resText}`,
           const emptyVendor = { original: null, analogs: [] };
           const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
           const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
-          const mapShatemP = (val) => mapShatem(val); // already async
+          const mapShatemP = (val) => mapShatem(val);
 
           const [rossko, alatrade, shatem] = await Promise.all([
             rosskoPromise.then(mapRosskoP).catch((e) => {
