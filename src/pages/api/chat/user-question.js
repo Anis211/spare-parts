@@ -4,6 +4,7 @@ import Chat from "@/models/Chat";
 import User from "@/models/User";
 import Alatrade from "@/models/Alatrade";
 import { getGrid } from "@/lib/gridfs";
+import { tonEncode } from "@/lib/ton";
 
 connectDB();
 
@@ -14,9 +15,37 @@ const openai = new OpenAI({
 
 export const config = {
   api: {
-    bodyParser: { sizeLimit: "20mb" }, // increase JSON body limit for base64 images
+    bodyParser: { sizeLimit: "20mb" },
   },
 };
+
+function toShortSchema(original, analogs) {
+  // original: {name,brand,article}
+  const O = original
+    ? {
+        n: original.name ?? null,
+        b: original.brand ?? null,
+        a: original.article ?? null,
+      }
+    : null;
+
+  const A = (analogs || []).map((x) => ({
+    s: x.source ?? null, // source
+    a: x.article ?? null, // article
+    b: x.brand ?? null, // brand
+    n: x.name ?? null, // name
+    // pictures intentionally omitted for model
+    k: (x.stocks || []).map((st) => ({
+      pr: st.partPrice ?? null, // price
+      ct: st.place ?? null, // city/place
+      qt: st.quantity ?? null, // quantity if present
+      ds: st.delivery?.start ?? null, // delivery start
+      de: st.delivery?.end ?? null, // delivery end
+    })),
+  }));
+
+  return { O, A };
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -41,106 +70,69 @@ export default async function handler(req, res) {
     let messages = [
       {
         role: "system",
-        content: `You are a helpful auto parts assistant with two capabilities:
-    
-1. Get part analogs by scraping using scrape_website function
-2. If the user asks simple questions not related to parts, answer directly without using functions
+        content: `
+You are a helpful auto-parts assistant with 3 functions:
 
-Use scrape_website when:
-- The user asks about the part in stock, ask for vin code and the part name
-- The user asks about the details from the part photo provided, dont ask for part number or part name, only ask for vin code if not provided
-- Do not ask for the part name, second time, if the user already provided it
-- You need to find the most similar parts to the requested one by their name, name is the key inside the request
-- The user asks for alternatives, analogs, or similar parts for a specific part, by vin code and part name
-- The user asks for prices or availability of a specific part by vin code and part name
-- The user needs from 3 to 7 analogs information (including names, prices, available in stores, do not give the links)
-- For example user sends a message like this (i need an oil filter for this car 5YJ3E1EA7KF000001) so the 'oil filter' is the name of the part and '5YJ3E1EA7KF000001' is the vin code, do not ask for confirmation if everything is clear. 
+1. scrape_website – find analogs for parts.
+2. order_parts – confirm user orders.
+3. find_and_send_pictures – show part images.
 
-Do NOT use scrape_website when:
-- The user asks general questions about cars, maintenance, or anything not related to specific parts
-- The user asks for advice on car issues, repairs, or recommendations not tied to a specific part
+scrape_website rules:
+Use only if the user asks about part stock, price, analogs, or sends a photo.
+Ask VIN if missing; never repeat requests for part name.
+Example: "I need an oil filter for 5YJ3E1EA7KF000001".
+Do NOT use for general car or maintenance questions.
+Use exact part number from DB.
+Show all analogs returned (no skipping).
+Each item must include: name, brand, base_price, and stocks → (city only, readable timing, quantity).
+Exclude OE numbers, links, addresses.
+Speak in user's language, friendly tone.
+Do not output images unless asked.
 
-When scraping:
-- Always use the exact part number from our database
+order_parts rules:
+Use when the user wants or confirms an order.
+Reply friendly confirmation listing ordered parts and link:
+http://localhost:3000/details/XXX (XXX = orderId)
 
-Output for scrape_website function results:
-- Give the answer in a friendly, conversational tone in the language the user used
-- You must use name, brand, price (is the base_price in the stocks part), and stocks (name, tariffDeliveryTimingWithTimezone(make it user readable), quantity) from the stocks part, do not show the oe number, the links and the address like Akzhol 30 (just show the city, like in Astana or in Karaganda) to the client
-- Do not use chatData information in the output
-- Output the exact name prop you recieve from the scrape_website function
-- Output the whole set of items in the analogs given to you as a function answer (for example if in the array you have 8 items, you must output all 8 of the items given to you, without any exceptions!!), but do now output the images of the products until the user asks you to do it
-
-Use order_parts function when:
-- The user wants to make an order
-- When the user is ready to make an order
-- When the user wants to get the part he chose, like brand, part name or etc.
-
-Output when order_parts is called:
-- Confirm the order with a friendly message including the number of parts ordered and the order ID
-- Provide a link to the page with the order information , like http://localhost:3000/details/XXX (where XXX is the orderId)
-
-Output when order_parts is called: 
-
+Example:
 Your order is confirmed! 🎉
-
-You've successfully ordered:
 1) STELLOX Oil Filter
 2) KS Oil Filter
+Check details: http://localhost:3000/details/123 🚗💨
 
-You can check your order details here: http://localhost:3000/details/XXX (replace XXX with your actual order ID)
+find_and_send_pictures rules:
+Use when user asks to see or compare a part.
+Return exactly: images: ["url1","url2","url3"]
 
-If you have any more questions or need help with anything else, just let me[object Object]🚗💨
+Formatting (critical):
+Plain text only — real line breaks.
+No markdown, "\\n", asterisks, or bold.
+Each item/detail on its own line.
+Separate items with blank lines.
+Max one emoji per line.
+Clarity > brevity.
 
-Use find_and_send_pictures:
-- When the user wants to see what part looks like
-- When the user asks for a picture to compare with his borken one
-- If the user wants to be sure that the part is the one he wants
+If tool content is TON {h,d,b} with {$:i} references, read by replacing {$:i} with d[i].
+Decoded schema: O={n,b,a}, A=[{s,a,b,n,k:[{pr,ct,qt,ds,de}]}].
 
-Output when find_and_send_pictures is called:
-- Just return an array that includes links for the pictures of specified part
-- Example of the output: some text about the part or etc. and for images output strictly like this ( images: ["url1", "url2", "url3"] ) dont use '(' and ')' in the output
-
-🛑 CRITICAL FORMATTING RULE — READ AND OBEY:
-
-You MUST output responses in clean, human-readable plain text with REAL line breaks — not “\\n”, not “\n”, not concatenated lines. Each item, label, or section must be on its own line. Use spacing to create visual clarity. No Markdown. No bold. No asterisks. No code-like formatting.
-
-📌 HOW TO FORMAT:
-
-Start every numbered item on a NEW LINE.
-Put each detail (part, description, price, availability) on its OWN LINE.
-Separate items with a blank line.
-Use emojis SPARINGLY: 1 per line max.
-NEVER run lines together. ALWAYS break them.
-🔧 Example of CORRECT output after calling scrape_website function:
-
-Alternatives for part "Oil Filter":
+Example output:
+Alternatives for "Oil Filter":
 
 1) BMW
   🔧 Oil Filter Insert
   💰 2,453
-  📍 In 11 stores — pick up today (10:00–22:00)
+  📍 In Astana — available today
+
 2) Mann
   🔧 Oil Filter Insert
   💰 925
-  📍 In 25 stores — available today
+  📍 In Karaganda — pick up today
 
-Need help choosing? I’m here for you! 🚗💨
-
-🚫 FORBIDDEN:
-
-“**”, “__”, “##”, “\\n”, “\n”
-All details on one line
-No spacing between items
-Robotic, dense, or concatenated output
-💡 You are a formatting assistant first. Clarity > brevity. Beauty > speed.
-Every line break is sacred. Every space is intentional.
-
-—
+Need help choosing? 🚗💨
 `,
       },
     ];
 
-    // Add past messages
     if (pastMessages.length > 0) {
       pastMessages.forEach((item) => {
         item.chat.forEach((msg) => {
@@ -154,7 +146,6 @@ Every line break is sacred. Every space is intentional.
 
     messages.push({ role: "user", content: userQuestion });
 
-    // ✅ MIGRATED: functions → tools
     const tools = [
       {
         type: "function",
@@ -246,7 +237,7 @@ Every line break is sacred. Every space is intentional.
     let queryEmbedding;
     try {
       const embeddingResponse = await openai.embeddings.create({
-        model: "text-embedding-ada-002",
+        model: "text-embedding-3-small",
         input: userQuestion,
       });
       queryEmbedding = embeddingResponse.data[0].embedding;
@@ -257,7 +248,7 @@ Every line break is sacred. Every space is intentional.
 
     // First LLM call with tools
     const firstResponse = await openai.chat.completions.create({
-      model: "gpt-4o", // ✅ Real, supported model
+      model: "gpt-4o",
       messages,
       tools,
       tool_choice: "auto",
@@ -668,11 +659,11 @@ Available parts data: ${resText}`,
             if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
             return r.json();
           })();
-
           const emptyVendor = { original: null, analogs: [] };
+
           const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
           const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
-          const mapShatemP = (val) => mapShatem(val);
+          const mapShatemP = (val) => mapShatem(val); // already async
 
           const [rossko, alatrade, shatem] = await Promise.all([
             rosskoPromise.then(mapRosskoP).catch((e) => {
@@ -761,25 +752,30 @@ Available parts data: ${resText}`,
           }
 
           const analogs = Array.from(mergedMap.values());
-          const functionResponse = {
-            partNumber: partNumber,
-            analogs: analogs,
+          chatData = { original, analogs };
+
+          const compact = toShortSchema(original, analogs);
+          const ton = tonEncode(compact);
+
+          const functionResponseForModel = {
+            fmt: "TONv1",
+            ton,
+            partNumber,
           };
 
-          // ✅ Add tool response (role: "tool")
-          messages.push(responseMessage); // assistant's tool_call message
+          messages.push(responseMessage);
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
             name: functionName,
-            content: JSON.stringify(functionResponse),
+            content: JSON.stringify(functionResponseForModel),
           });
 
-          // now set the data you return / store
-          chatData = { original, analogs };
           finalResponse = await openai.chat.completions.create({
             model: "gpt-4o",
             messages,
+            max_tokens: 800,
+            temperature: 0,
           });
         } catch (scrapeError) {
           console.error("Scraping error:", scrapeError);

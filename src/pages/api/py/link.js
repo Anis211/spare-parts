@@ -17,8 +17,12 @@ export default async function handler(req, res) {
       "Scripts",
       "python.exe"
     );
-    const scriptPath = path.join(process.cwd(), "python", "link.py");
-    const scriptAnalogsPath = path.join(process.cwd(), "python", "analogs.py");
+    const scriptPath = path.join(process.cwd(), "python", "rossko_link.py");
+    const scriptAnalogsPath = path.join(
+      process.cwd(),
+      "python",
+      "rossko_analogs.py"
+    );
 
     // ---------------- retry helpers (non-invasive) ----------------
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
