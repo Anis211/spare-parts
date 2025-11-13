@@ -5,6 +5,11 @@ import User from "@/models/User";
 import Alatrade from "@/models/Alatrade";
 import { getGrid } from "@/lib/gridfs";
 import { tonEncode } from "@/lib/ton";
+import {
+  MicroBatcher,
+  openaiMessagesTransportFactory,
+} from "@/lib/microBatcher.js";
+import { createLimitedCaller } from "@/lib/limiterBackoff";
 
 connectDB();
 
@@ -12,6 +17,67 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   timeout: 30000,
 });
+
+// === Rate limiter + backoff configuration ===
+const REQS_PER_MIN = 60;
+const ratePerSec = REQS_PER_MIN / 60;
+const burstCapacity = 60;
+const limitedCall = createLimitedCaller({ ratePerSec, burstCapacity });
+
+// === Micro Batcher configuration ===
+const chatBatcher = new MicroBatcher({
+  maxBatchSize: 16,
+  maxWaitMs: 50,
+  transport: openaiMessagesTransportFactory({ openai }),
+});
+
+// === LLM Wrapper ===
+const llmChat = (messages, options = {}) =>
+  limitedCall(
+    async () => {
+      // MicroBatcher will call OpenAI under the hood via your transport
+      return chatBatcher.enqueue({ messages, options });
+    },
+    {
+      cost: 1, // 1 "request" per call – adjust if you want token-based costing
+      backoffOpts: {
+        maxRetries: 6,
+        baseMs: 250,
+        onShouldRetry: (err) => {
+          const code = err?.code;
+          const status = err?.status ?? err?.response?.status;
+          const transientNet = [
+            "ETIMEDOUT",
+            "ECONNRESET",
+            "EAI_AGAIN",
+          ].includes(code);
+          return (
+            transientNet || status === 429 || (status >= 500 && status <= 599)
+          );
+        },
+      },
+    }
+  );
+
+// === Embedding Protection ===
+async function safeEmbedding(input) {
+  return limitedCall(
+    async () => {
+      const embeddingResponse = await openai.embeddings.create({
+        model: "text-embedding-3-small",
+        input,
+      });
+      return embeddingResponse;
+    },
+    {
+      cost: 1,
+      backoffOpts: {
+        maxRetries: 4,
+        baseMs: 200,
+      },
+    }
+  );
+}
 
 export const config = {
   api: {
@@ -236,10 +302,7 @@ Need help choosing? 🚗💨
     // Create embedding
     let queryEmbedding;
     try {
-      const embeddingResponse = await openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: userQuestion,
-      });
+      const embeddingResponse = await safeEmbedding(userQuestion);
       queryEmbedding = embeddingResponse.data[0].embedding;
     } catch (embeddingError) {
       console.warn("Embedding failed:", embeddingError);
@@ -247,9 +310,8 @@ Need help choosing? 🚗💨
     }
 
     // First LLM call with tools
-    const firstResponse = await openai.chat.completions.create({
+    const firstResponse = await llmChat(messages, {
       model: "gpt-4o",
-      messages,
       tools,
       tool_choice: "auto",
       temperature: 1,
@@ -299,9 +361,8 @@ Need help choosing? 🚗💨
             })),
           ];
 
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
+          const completion = await llmChat(
+            [
               {
                 role: "system",
                 content:
@@ -309,12 +370,11 @@ Need help choosing? 🚗💨
               },
               { role: "user", content },
             ],
-            temperature: 0,
-          });
+            { model: "gpt-4o", temperature: 0 }
+          );
 
           let detected =
             completion.choices?.[0]?.message?.content?.trim() || "";
-          // normalize a bit
           detected = detected.replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
 
           if (detected && detected.toLowerCase() !== "unknown") {
@@ -350,9 +410,8 @@ Available parts data: ${resText}`,
             },
           ];
 
-          const aiResponse = await openai.chat.completions.create({
+          const aiResponse = await llmChat(extractionMessages, {
             model: "gpt-4o",
-            messages: extractionMessages,
             temperature: 0,
           });
           partNumber = aiResponse.choices[0].message.content.trim();
@@ -771,9 +830,8 @@ Available parts data: ${resText}`,
             content: JSON.stringify(functionResponseForModel),
           });
 
-          finalResponse = await openai.chat.completions.create({
+          finalResponse = await llmChat(messages, {
             model: "gpt-4o",
-            messages,
             max_tokens: 800,
             temperature: 0,
           });
@@ -794,9 +852,10 @@ Available parts data: ${resText}`,
             content: JSON.stringify(errorResponse),
           });
 
-          finalResponse = await openai.chat.completions.create({
+          finalResponse = await llmChat(messages, {
             model: "gpt-4o",
-            messages,
+            max_tokens: 800,
+            temperature: 0,
           });
         }
       } else if (functionName === "order_parts") {
@@ -914,10 +973,7 @@ Available parts data: ${resText}`,
             content: JSON.stringify(functionResponse),
           });
 
-          finalResponse = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages,
-          });
+          finalResponse = await llmChat(messages, { model: "gpt-4o" });
         } catch (orderError) {
           console.error("Order error:", orderError);
 
@@ -934,10 +990,7 @@ Available parts data: ${resText}`,
             content: JSON.stringify(errorResponse),
           });
 
-          finalResponse = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages,
-          });
+          finalResponse = await llmChat(messages, { model: "gpt-4o" });
         }
       } else if (functionName === "find_and_send_pictures") {
         const { partData } = functionArgs;
@@ -1073,10 +1126,7 @@ Available parts data: ${resText}`,
             content: JSON.stringify(functionResponse),
           });
 
-          finalResponse = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages,
-          });
+          finalResponse = await llmChat(messages, { model: "gpt-4o" });
         } catch (pictureError) {
           console.error("Find picture error:", pictureError);
 
@@ -1093,10 +1143,7 @@ Available parts data: ${resText}`,
             content: JSON.stringify(errorResponse),
           });
 
-          finalResponse = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages,
-          });
+          finalResponse = await llmChat(messages, { model: "gpt-4o" });
         }
       } else {
         // Unrecognized tool
@@ -1184,17 +1231,15 @@ Available parts data: ${resText}`,
       await newChat.save();
     }
 
-    res.status(200).json({
-      response: aiResponse,
-      matchedPartIds,
-      success: true,
-    });
+    res
+      .status(200)
+      .json({ response: aiResponse, matchedPartIds, success: true });
   } catch (error) {
     console.error("API Error:", error);
 
     if (
-      error.message.includes("timeout") ||
-      error.message.includes("timed out")
+      error.message?.includes("timeout") ||
+      error.message?.includes("timed out")
     ) {
       return res.status(408).json({
         success: false,
