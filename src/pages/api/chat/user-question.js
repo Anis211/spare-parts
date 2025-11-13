@@ -10,6 +10,8 @@ import {
   openaiMessagesTransportFactory,
 } from "@/lib/microBatcher.js";
 import { createLimitedCaller } from "@/lib/limiterBackoff";
+import Semaphore from "@/lib/bulkhead";
+import CircuitBreaker from "@/lib/circuitBreaker";
 
 connectDB();
 
@@ -77,6 +79,11 @@ async function safeEmbedding(input) {
       },
     }
   );
+}
+
+// === Wrapper For Bulkhead And Circuit Breaker ===
+function resilientVendorCall(breaker, semaphore, fn) {
+  return breaker.exec(() => semaphore.run(fn));
 }
 
 export const config = {
@@ -669,60 +676,102 @@ Available parts data: ${resText}`,
             return { antiforgery, x_access_token, x_refresh_token };
           }
 
+          // how many concurrent calls per vendor
+          const rosskoSemaphore = new Semaphore(6);
+          const alatradeSemaphore = new Semaphore(6);
+          const shatemSemaphore = new Semaphore(3);
+
+          // circuit breaker configs (tune as needed)
+          const rosskoBreaker = new CircuitBreaker({
+            failureThreshold: 0.5,
+            minSamples: 10,
+            cooldownMs: 30_000,
+            windowMs: 60_000,
+          });
+
+          const alatradeBreaker = new CircuitBreaker({
+            failureThreshold: 0.5,
+            minSamples: 10,
+            cooldownMs: 30_000,
+            windowMs: 60_000,
+          });
+
+          const shatemBreaker = new CircuitBreaker({
+            failureThreshold: 0.5,
+            minSamples: 10,
+            cooldownMs: 60_000,
+            windowMs: 60_000,
+          });
+
           // ── run all vendors concurrently ───────────────────────────────────────────
           const alatradeTokenPromise = ensureAlatradeAuth();
           const shatemTokenPromise = ensureShatemAuth();
 
-          const rosskoPromise = (async () => {
-            const r = await fetchWithTimeout(proxyRosskoUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ partNumber, partName }),
-            });
-            if (!r.ok) throw new Error(`Rossko HTTP ${r.status}`);
-            return r.json();
-          })();
+          // Rossko (bulkhead + circuit breaker)
+          const rosskoPromise = resilientVendorCall(
+            rosskoBreaker,
+            rosskoSemaphore,
+            async () => {
+              const r = await fetchWithTimeout(proxyRosskoUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ partNumber, partName }),
+              });
+              if (!r.ok) throw new Error(`Rossko HTTP ${r.status}`);
+              return r.json();
+            }
+          );
 
-          const alatradePromise = (async () => {
-            const { ci, rem } = await alatradeTokenPromise;
-            const r = await fetchWithTimeout(proxyAlatradeUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                partNumber,
-                partName,
-                ci_session: ci,
-                rem_id: rem,
-              }),
-            });
-            if (!r.ok) throw new Error(`Alatrade HTTP ${r.status}`);
-            return r.json();
-          })();
+          // Alatrade (bulkhead + circuit breaker)
+          const alatradePromise = resilientVendorCall(
+            alatradeBreaker,
+            alatradeSemaphore,
+            async () => {
+              const { ci, rem } = await alatradeTokenPromise;
+              const r = await fetchWithTimeout(proxyAlatradeUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  partNumber,
+                  partName,
+                  ci_session: ci,
+                  rem_id: rem,
+                }),
+              });
+              if (!r.ok) throw new Error(`Alatrade HTTP ${r.status}`);
+              return r.json();
+            }
+          );
 
-          const shatemPromise = (async () => {
-            const { antiforgery, x_access_token, x_refresh_token } =
-              await shatemTokenPromise;
+          // Shatem (bulkhead + circuit breaker)
+          const shatemPromise = resilientVendorCall(
+            shatemBreaker,
+            shatemSemaphore,
+            async () => {
+              const { antiforgery, x_access_token, x_refresh_token } =
+                await shatemTokenPromise;
 
-            const r = await fetchWithTimeout(proxyShatemUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                partNumber,
-                agreement: SHATEM_AGREEMENT,
-                partName,
-                antiforgery,
-                x_access_token,
-                x_refresh_token,
-              }),
-            });
-            if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
-            return r.json();
-          })();
+              const r = await fetchWithTimeout(proxyShatemUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  partNumber,
+                  agreement: SHATEM_AGREEMENT,
+                  partName,
+                  antiforgery,
+                  x_access_token,
+                  x_refresh_token,
+                }),
+              });
+              if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
+              return r.json();
+            }
+          );
           const emptyVendor = { original: null, analogs: [] };
 
           const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
           const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
-          const mapShatemP = (val) => mapShatem(val); // already async
+          const mapShatemP = (val) => mapShatem(val); // async
 
           const [rossko, alatrade, shatem] = await Promise.all([
             rosskoPromise.then(mapRosskoP).catch((e) => {
