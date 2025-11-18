@@ -42,10 +42,15 @@ const chatSchema = new mongoose.Schema(
         text: { type: String, required: true, maxlength: 5000 },
         embedding: {
           type: [Number],
-          validate: [
-            (array) => !array || array.length === 1536,
-            "Embedding must be 1536-dimensional",
-          ],
+          validate: {
+            validator: function (array) {
+              if (!array || array.length === 0) return true;
+              // Если хочешь валидировать только user:
+              // if (this.metadata?.role !== "user") return true;
+              return array.length === 1536;
+            },
+            message: "Embedding must be 1536-dimensional",
+          },
         },
         metadata: {
           role: {

@@ -39,7 +39,12 @@ export default async function handler(req, res) {
       pr1.on("close", (code) => {
         if (code === 0) {
           try {
-            const parsedProducts = JSON.parse(stdoutData);
+            let out = (stdoutData || "").trim();
+            if (!out) {
+              out = "[]";
+            }
+
+            const parsedProducts = JSON.parse(out);
             resolve(parsedProducts);
           } catch (e) {
             console.error("Failed to parse Python output:", e);

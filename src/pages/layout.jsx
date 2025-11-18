@@ -17,9 +17,12 @@ export default function Layout({ children }) {
     { isUser: false, text: "How can I help you today?" },
   ]);
   const [message, setMessage] = useState("");
+  const [pendingMessages, setPendingMessages] = useState([]);
   const [messageImages, setMessageImages] = useState([]);
 
   const fileInputRef = useRef(null);
+  const debounceRef = useRef(null);
+  const pendingRef = useRef([]);
 
   const handleButtonClick = () => {
     fileInputRef.current?.click();
@@ -64,14 +67,58 @@ export default function Layout({ children }) {
     }
   };
 
+  const flushPendingMessages = async (lastImagesBase64) => {
+    const toSend = pendingRef.current;
+    if (!toSend || toSend.length === 0) return;
+
+    // Clear buffer **before** sending
+    pendingRef.current = [];
+    setPendingMessages([]);
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/chat/user-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessages: toSend,
+          userImages: lastImagesBase64 || [],
+          user: user.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`API ${response.status}: ${err}`);
+      }
+
+      const answer = await response.json();
+
+      // Show assistant reply in chat
+      setMessages((prev) => [
+        ...prev,
+        { isUser: false, text: answer.response },
+      ]);
+    } catch (err) {
+      console.error("flushPendingMessages error:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (message.trim() === "") return;
+
+    if (message.trim() === "" && (!messageImages || messageImages.length === 0))
+      return;
 
     console.log("Sending message:", message);
     console.log("With images:", messageImages);
 
+    let imagesBase64 = [];
+
     try {
+      // --- 1. Convert files to base64 and upload them ---
       const fileToDataURL = (file) =>
         new Promise((resolve, reject) => {
           const r = new FileReader();
@@ -83,35 +130,64 @@ export default function Layout({ children }) {
       const files = (messageImages || []).flatMap((x) =>
         x instanceof FileList ? Array.from(x) : [x]
       );
-      const imagesBase64 = await Promise.all(files.map(fileToDataURL));
 
-      // 4) Send JSON payload
-      const response = await fetch("/api/chat/user-question", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user: user.id,
-          userQuestion: message,
-          userImages: imagesBase64,
-        }),
-      });
+      imagesBase64 = await Promise.all(files.map(fileToDataURL));
 
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`API ${response.status}: ${err}`);
+      let imageUrls = [];
+      if (imagesBase64.length > 0) {
+        const uploadRes = await fetch("/api/images/bulk-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: imagesBase64 }),
+        });
+
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          throw new Error(
+            `Image upload failed ${uploadRes.status}: ${errText}`
+          );
+        }
+
+        const { urls } = await uploadRes.json();
+        imageUrls = urls || [];
+        setMessageImages([]); // clear selected images after successful upload
       }
 
-      const answer = await response.json();
-      console.log("API answer:", answer);
+      // --- 2. Build the final user message text ---
+      const finalMessage =
+        imageUrls.length > 0
+          ? `${message} images: [${imageUrls.join(", ")}]`
+          : message;
 
+      // Immediately show user message in chat
       setMessages((prev) => [
         ...prev,
-        { isUser: false, text: answer.response },
+        {
+          text: finalMessage,
+          isUser: true,
+        },
       ]);
+
+      // Add to pending buffer
+      setPendingMessages((prev) => {
+        const updated = [...prev, finalMessage];
+        pendingRef.current = updated;
+        return updated;
+      });
+
+      // Clear input
+      setMessage("");
+
+      // --- 3. Debounce: wait a bit for more user messages ---
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+
+      debounceRef.current = setTimeout(() => {
+        flushPendingMessages(imagesBase64);
+      }, 2500);
     } catch (error) {
       console.error("Error:", error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -272,31 +348,7 @@ export default function Layout({ children }) {
                 </div>
 
                 <form
-                  onSubmit={(e) => {
-                    setIsLoading(true);
-                    if (messageImages.length != []) {
-                      setMessages((prev) => [
-                        ...prev,
-                        {
-                          text: `${message} images: [${messageImages
-                            .map((file) => file.name)
-                            .join(", ")}]`,
-                          isUser: true,
-                        },
-                      ]);
-                    } else {
-                      setMessages((prev) => [
-                        ...prev,
-                        {
-                          text: message,
-                          isUser: true,
-                        },
-                      ]);
-                    }
-                    sendMessage(e);
-                    setMessage("");
-                    setMessageImages([]);
-                  }}
+                  onSubmit={(e) => sendMessage(e)}
                   className="p-4 border-t border-gray-200"
                 >
                   <div className="flex">

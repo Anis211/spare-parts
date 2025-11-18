@@ -107,7 +107,6 @@ function toShortSchema(original, analogs) {
     a: x.article ?? null, // article
     b: x.brand ?? null, // brand
     n: x.name ?? null, // name
-    // pictures intentionally omitted for model
     k: (x.stocks || []).map((st) => ({
       pr: st.partPrice ?? null, // price
       ct: st.place ?? null, // city/place
@@ -129,15 +128,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { userQuestion, userImages, user } = req.body;
+    const { userMessages, userImages, user } = req.body;
     console.log("Started user-question.js");
 
-    if (!userQuestion || !user) {
+    if (!userMessages || !user) {
       return res.status(400).json({
         success: false,
         message: "Missing parameters",
       });
     }
+
+    const userQuestion = userMessages.map((text) => ({
+      role: "user",
+      content: text,
+    }));
 
     const pastMessages = await Chat.find({}).sort({ createdAt: -1 }).limit(3);
     let messages = [
@@ -151,9 +155,9 @@ You are a helpful auto-parts assistant with 3 functions:
 3. find_and_send_pictures – show part images.
 
 scrape_website rules:
-Use only if the user asks about part stock, price, analogs, or sends a photo.
+if there is images: ['url', 'url'] in the user message than it is the image user have provided to you
+Use only if the user asks about part stock, price, analogs, or sends a photo of the part he needs.
 Ask VIN if missing; never repeat requests for part name.
-Example: "I need an oil filter for 5YJ3E1EA7KF000001".
 Do NOT use for general car or maintenance questions.
 Use exact part number from DB.
 Show all analogs returned (no skipping).
@@ -161,6 +165,7 @@ Each item must include: name, brand, base_price, and stocks → (city only, read
 Exclude OE numbers, links, addresses.
 Speak in user's language, friendly tone.
 Do not output images unless asked.
+Output the part name and brands exactly how they are in the data recieved, do not shorten them or use part name for the other brand, but do not include article of the part in part name, if there is 7 parts you must output all 7 of them
 
 order_parts rules:
 Use when the user wants or confirms an order.
@@ -217,7 +222,7 @@ Need help choosing? 🚗💨
       });
     }
 
-    messages.push({ role: "user", content: userQuestion });
+    userQuestion.map((message) => messages.push(message));
 
     const tools = [
       {
@@ -306,14 +311,36 @@ Need help choosing? 🚗💨
       },
     ];
 
-    // Create embedding
-    let queryEmbedding;
+    // === Embedding creation with strict dimension check ===
+    let queryEmbedding = null;
+    let textForEmbedding = "";
+
+    if (Array.isArray(userMessages) && userMessages.length > 0) {
+      textForEmbedding = userMessages.join("\n");
+    } else if (typeof userQuestion === "string" && userQuestion.trim()) {
+      textForEmbedding = userQuestion;
+    }
+
     try {
-      const embeddingResponse = await safeEmbedding(userQuestion);
-      queryEmbedding = embeddingResponse.data[0].embedding;
+      if (textForEmbedding.trim().length > 0) {
+        const embeddingResponse = await safeEmbedding(textForEmbedding);
+        const vec = embeddingResponse?.data?.[0]?.embedding;
+
+        if (Array.isArray(vec) && vec.length === 1536) {
+          queryEmbedding = vec;
+        } else {
+          console.warn(
+            "Unexpected embedding dimension:",
+            Array.isArray(vec) ? vec.length : "no embedding"
+          );
+          queryEmbedding = null; // do NOT save invalid embeddings
+        }
+      } else {
+        queryEmbedding = null;
+      }
     } catch (embeddingError) {
       console.warn("Embedding failed:", embeddingError);
-      queryEmbedding = [];
+      queryEmbedding = null; // null instead of []
     }
 
     // First LLM call with tools
@@ -345,10 +372,7 @@ Need help choosing? 🚗💨
         const baseUrl =
           process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
 
-        console.log(
-          "User Images:",
-          Array.isArray(userImages) ? userImages.length : 0
-        );
+        console.log("User Images:", userImages);
 
         // If user sent images and did NOT supply a part name, extract from image
         if (
@@ -1206,19 +1230,28 @@ Available parts data: ${resText}`,
     const aiResponse = finalResponse.choices[0].message.content;
 
     // Save chat
+    const combinedUserText =
+      Array.isArray(userMessages) && userMessages.length > 0
+        ? userMessages.join("\n")
+        : String(userQuestion || "");
+
     const chatUpdate = {
-      text: userQuestion,
+      text: combinedUserText,
       metadata: {
         role: "user",
         createdAt: new Date(),
+        multi: Array.isArray(userMessages) && userMessages.length > 1,
+        messages:
+          Array.isArray(userMessages) && userMessages.length > 0
+            ? userMessages
+            : [combinedUserText],
       },
     };
 
-    if (queryEmbedding.length > 0) {
+    if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1536) {
       chatUpdate.embedding = queryEmbedding;
     }
 
-    const existingChat = await Chat.findOne({ user });
     const assistantMessage = {
       text: aiResponse,
       metadata: {
@@ -1227,41 +1260,29 @@ Available parts data: ${resText}`,
       },
     };
 
-    if (queryEmbedding.length > 0) {
-      assistantMessage.embedding = queryEmbedding;
-    }
+    const existingChat = await Chat.findOne({ user });
 
     if (existingChat) {
-      await Chat.findOneAndUpdate(
+      await Chat.updateOne(
         { user },
         {
           $push: {
-            chat: chatUpdate,
-          },
-        }
-      );
-
-      await Chat.findOneAndUpdate(
-        { user },
-        {
-          $push: {
-            chat: assistantMessage,
+            chat: { $each: [chatUpdate, assistantMessage] },
           },
         }
       );
 
       if (chatData != null) {
-        const previous = await Chat.findOne({ user });
-        let check = [];
+        const alreadyExists =
+          Array.isArray(existingChat.chatData) &&
+          existingChat.chatData.some(
+            (item) =>
+              item?.original?.article === chatData.original?.article &&
+              item?.original?.name === chatData.original?.name
+          );
 
-        check = previous.chatData.filter(
-          (item) =>
-            chatData.original.article == item.original.article &&
-            chatData.original.name == item.original.name
-        );
-
-        if (check.length == 0) {
-          await Chat.findOneAndUpdate(
+        if (!alreadyExists) {
+          await Chat.updateOne(
             { user },
             {
               $push: {
@@ -1274,9 +1295,10 @@ Available parts data: ${resText}`,
     } else {
       const newChat = new Chat({
         user,
-        chatData: chatData != null ? chatData : [],
+        chatData: chatData != null ? [chatData] : [],
         chat: [chatUpdate, assistantMessage],
       });
+
       await newChat.save();
     }
 
