@@ -48,39 +48,59 @@ const features = [
 
 const App = () => {
   const handleClick = async () => {
-    const proxyShatemAuthUrl = `/api/py/shatem_auth`;
-    const proxyShatemUrl = `/api/py/shatem`;
+    const proxyAutotradeAuthUrl = `/api/py/autotrade_auth`;
+    const proxyAutotradeUrl = `/api/py/autotrade`;
     const partNumber = "CRG-32";
-    const partName = "Тяга рулевая";
-    const agreement = "KSAGR00684";
 
-    const scrapeShatemAuthResponse = await fetch(proxyShatemAuthUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const scrapeShatemAuthData = await scrapeShatemAuthResponse.json();
-    console.log(scrapeShatemAuthData);
+    try {
+      // -----------------------------------------
+      // 1. Fetch Auth Data
+      // -----------------------------------------
+      console.log("Step 1: Fetching Auth...");
+      const authResponse = await fetch(proxyAutotradeAuthUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
 
-    const scrapeShatemResponse = await fetch(proxyShatemUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        partNumber,
-        partName,
-        agreement,
-        antiforgery: scrapeShatemAuthData.auth_data.find(
-          (c) => c.name === ".AspNetCore.Antiforgery.VyLW6ORzMgk"
-        )?.value,
-        x_access_token: scrapeShatemAuthData.auth_data.find(
-          (c) => c.name === "X-Access-Token"
-        )?.value,
-        x_refresh_token: scrapeShatemAuthData.auth_data.find(
-          (c) => c.name === "X-Refresh-Token"
-        )?.value,
-      }),
-    });
-    const scrapeShatemData = await scrapeShatemResponse.json();
-    console.log(scrapeShatemData);
+      const authData = await authResponse.json();
+      console.log("Auth Data Received:", authData);
+
+      // Validate we have the cookie jar
+      const jar = authData.cookie_jar || authData.auth_data?.cookie_jar;
+      if (!jar) {
+        console.error("Error: No cookie_jar found in auth response", authData);
+        return;
+      }
+
+      // -----------------------------------------
+      // 2. Use Auth Data to Fetch Stocks
+      // -----------------------------------------
+      console.log("Step 2: Fetching Stocks...");
+
+      const payload = {
+        q: partNumber,
+        auth_key: ":auth_key",
+        sessid: jar.sessid,
+        ddg8: jar.__ddg8_, // Mapping __ddg8_ from jar to ddg8 arg
+        ddg9: jar.__ddg9_,
+        ddg10: jar.__ddg10_,
+        ddg1: jar.__ddg1_,
+        lang: jar.lang,
+        series: jar.series,
+        logindt: jar.logindt,
+      };
+
+      const stockResponse = await fetch(proxyAutotradeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const stockData = await stockResponse.json();
+      console.log("Final Stock Data:", stockData);
+    } catch (error) {
+      console.error("Autotrade Pipeline Error:", error);
+    }
   };
 
   return (

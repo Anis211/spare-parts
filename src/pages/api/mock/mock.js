@@ -1,6 +1,5 @@
 const mockDb = {
   "1N4AL3AP1JC123456": {
-    // 2018 Nissan Altima
     "Brake Pad Front": "41060-3JA0A",
     "Brake Pad Rear": "43060-3JA0A",
     "Air Filter": "16546-3JA0A",
@@ -8,14 +7,12 @@ const mockDb = {
     "Cabin Air Filter": "27277-3JA0A",
   },
   "5YJ3E1EA7KF000001": {
-    // 2019 Tesla Model 3
     "Tie Rod": "CRG-32",
     "Oil Filter": "ELH4364",
     "Main Radiator": "45111-SG000",
     "Wiper Blade Front": "1010240-00-D",
   },
   WBA8E1C56GNT12345: {
-    // 2016 BMW 328i
     "Brake Pad Front": "34116791193",
     "Oil Filter": "11427987859",
     "Air Filter": "13717593720",

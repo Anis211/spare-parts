@@ -263,7 +263,7 @@ Need help choosing? 🚗💨
                     partName: {
                       type: "string",
                       description:
-                        "It is the name of the part being ordered (it must be translated to russian language)",
+                        "It is the name of the part being ordered (it must be the same as it is in the previous message history)",
                     },
                     brand: { type: "string" },
                     orderQuantity: { type: "number", minimum: 1 },
@@ -453,13 +453,16 @@ Available parts data: ${resText}`,
 
           // after you have: baseUrl, partNumber, partName, vin
           const proxyRosskoUrl = `${baseUrl}/api/py/link`;
+
           const proxyAlatradeUrl = `${baseUrl}/api/py/alatrade`;
           const proxyAlatradeAuthUrl = `${baseUrl}/api/py/alatrade_auth`;
 
           const proxyShatemUrl = `${baseUrl}/api/py/shatem`;
           const proxyShatemAuthUrl = `${baseUrl}/api/py/shatem_auth`;
-
           const SHATEM_AGREEMENT = "KSAGR00684";
+
+          const proxyAutotradeUrl = `${baseUrl}/api/py/autotrade`;
+          const proxyAutotradeAuthUrl = `${baseUrl}/api/py/autotrade_auth`;
 
           // ── helpers ───────────────────────────────────────────────────────────────────
           const fetchWithTimeout = (url, opts = {}, ms = 20000) => {
@@ -595,7 +598,7 @@ Available parts data: ${resText}`,
                   article: item.article,
                   brand: item.partInfo.tradeMarkName,
                   name: item.name,
-                  guid: "",
+                  guid: item.guid,
                   pictures: pictures.filter(Boolean),
                   stocks: [
                     {
@@ -614,6 +617,32 @@ Available parts data: ${resText}`,
 
             return { original: null, analogs }; // <- return an object like your other mappers
           }
+
+          const mapAutotrade = (d) => {
+            const rawItems = Array.isArray(d) ? d : d?.items || [];
+
+            const analogs = rawItems.values().map((item) => ({
+              source: "autotrade",
+              original_id: item.id || item.guid,
+              article: item.article,
+              brand: item.brand,
+              name: item.name,
+              guid: item.id || "",
+              pictures: item.images || [],
+              stocks: item.stocks
+                .values()
+                .filter((place) => place.name.includes("Астана"))
+                .map((stock) => ({
+                  partPrice: item.price,
+                  place: stock.name,
+                  delivery: {
+                    start: stock.delivery || "1",
+                    end: stock.delivery || "1",
+                  },
+                })),
+            }));
+            return { original: null, analogs };
+          };
 
           // get/refresh Alatrade cookies in parallel with Rossko (fast)
           async function ensureAlatradeAuth() {
@@ -700,10 +729,26 @@ Available parts data: ${resText}`,
             return { antiforgery, x_access_token, x_refresh_token };
           }
 
+          async function ensureAutotradeAuth() {
+            const r = await fetchWithTimeout(proxyAutotradeAuthUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            if (!r.ok) throw new Error(`Autotrade Auth HTTP ${r.status}`);
+            const data = await r.json();
+
+            // Extract jar based on your previous python script output
+            const jar = data.cookie_jar || data.auth_data?.cookie_jar;
+            if (!jar) throw new Error("Autotrade auth missing cookie_jar");
+
+            return jar;
+          }
+
           // how many concurrent calls per vendor
           const rosskoSemaphore = new Semaphore(6);
           const alatradeSemaphore = new Semaphore(6);
           const shatemSemaphore = new Semaphore(3);
+          const autotradeSemaphore = new Semaphore(6);
 
           // circuit breaker configs (tune as needed)
           const rosskoBreaker = new CircuitBreaker({
@@ -727,9 +772,17 @@ Available parts data: ${resText}`,
             windowMs: 60_000,
           });
 
+          const autotradeBreaker = new CircuitBreaker({
+            failureThreshold: 0.5,
+            minSamples: 10,
+            cooldownMs: 30_000,
+            windowMs: 60_000,
+          });
+
           // ── run all vendors concurrently ───────────────────────────────────────────
           const alatradeTokenPromise = ensureAlatradeAuth();
           const shatemTokenPromise = ensureShatemAuth();
+          const autotradeTokenPromise = ensureAutotradeAuth();
 
           // Rossko (bulkhead + circuit breaker)
           const rosskoPromise = resilientVendorCall(
@@ -791,13 +844,45 @@ Available parts data: ${resText}`,
               return r.json();
             }
           );
+
+          const autotradePromise = resilientVendorCall(
+            autotradeBreaker,
+            autotradeSemaphore,
+            async () => {
+              const jar = await autotradeTokenPromise;
+
+              // Construct payload mapping cookie_jar keys to API expectations
+              const payload = {
+                q: partNumber, // Uses the extracted partNumber from LLM
+                auth_key: ":auth_key",
+                sessid: jar.sessid,
+                ddg8: jar.__ddg8_,
+                ddg9: jar.__ddg9_,
+                ddg10: jar.__ddg10_,
+                ddg1: jar.__ddg1_,
+                lang: jar.lang,
+                series: jar.series,
+                logindt: jar.logindt,
+              };
+
+              const r = await fetchWithTimeout(proxyAutotradeUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+
+              if (!r.ok) throw new Error(`Autotrade HTTP ${r.status}`);
+              return r.json();
+            }
+          );
           const emptyVendor = { original: null, analogs: [] };
 
           const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
           const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
-          const mapShatemP = (val) => mapShatem(val); // async
+          const mapShatemP = (val) => mapShatem(val);
+          const mapAutotradeP = (val) => Promise.resolve(mapAutotrade(val));
 
-          const [rossko, alatrade, shatem] = await Promise.all([
+          const [rossko, alatrade, shatem, autotrade] = await Promise.all([
             rosskoPromise.then(mapRosskoP).catch((e) => {
               console.error("[rossko] failed:", e?.message || e);
               return emptyVendor;
@@ -810,11 +895,16 @@ Available parts data: ${resText}`,
               console.error("[shatem] failed:", e?.message || e);
               return emptyVendor;
             }),
+            autotradePromise.then(mapAutotradeP).catch((e) => {
+              console.error("[autotrade] failed:", e?.message || e);
+              return emptyVendor;
+            }),
           ]);
 
           console.log("rossko analogs:", rossko.analogs.length);
           console.log("alatrade analogs:", alatrade.analogs.length);
           console.log("shatem analogs:", shatem.analogs.length);
+          console.log("autotrade analogs:", autotrade.analogs.length);
 
           // if Rossko returned an original product, prefer it for chatData.original
           let original = rossko.original ??
@@ -830,6 +920,7 @@ Available parts data: ${resText}`,
             ...rossko.analogs,
             ...alatrade.analogs,
             ...shatem.analogs,
+            ...autotrade.analogs,
           ];
 
           console.log("combined: ", combined);
@@ -951,35 +1042,104 @@ Available parts data: ${resText}`,
           );
         }
 
-        const chatData = chatDoc.chatData[chatDoc.chatData.length - 1];
-        const allAvailableParts = [
-          {
-            ...chatData.original,
-            name: chatData.original?.name,
-            brand: chatData.original?.brand,
-            article: chatData.original?.article,
-            type: "original",
-          },
-          ...(chatData.analogs || []).map((analog) => ({
-            ...analog,
-            name: analog.name,
-            brand: analog.brand,
-            article: analog.article,
-            pictures: analog.pictures,
-            type: "analog",
-          })),
-        ];
+        // ---------- helpers ----------
+        const normalize = (s) =>
+          (s ?? "")
+            .toString()
+            .toLowerCase()
+            .replace(/[\\\/|_+.,!<>()[\]{}:;"'`~^%$#@*&?-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
 
-        // Match each ordered part to full data
+        const levenshtein = (a, b) => {
+          const m = a.length,
+            n = b.length;
+          if (!m) return n;
+          if (!n) return m;
+          const dp = Array.from({ length: m + 1 }, (_, i) =>
+            Array(n + 1).fill(0)
+          );
+          for (let i = 0; i <= m; i++) dp[i][0] = i;
+          for (let j = 0; j <= n; j++) dp[0][j] = j;
+          for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+              const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+              dp[i][j] = Math.min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost
+              );
+            }
+          }
+          return dp[m][n];
+        };
+
+        const levRatio = (a, b) => {
+          const A = normalize(a),
+            B = normalize(b);
+          if (!A || !B) return 0;
+          if (A === B) return 1;
+          const dist = levenshtein(A, B);
+          return 1 - dist / Math.max(A.length, B.length);
+        };
+
+        const tokenSetRatio = (a, b) => {
+          const A = new Set(normalize(a).split(" ").filter(Boolean));
+          const B = new Set(normalize(b).split(" ").filter(Boolean));
+          if (!A.size || !B.size) return 0;
+          let inter = 0;
+          for (const t of A) if (B.has(t)) inter++;
+          return (2 * inter) / (A.size + B.size);
+        };
+
+        const nameSimilarity = (a, b) =>
+          Math.max(levRatio(a, b), tokenSetRatio(a, b));
+
+        const brandEqual = (a, b) => normalize(a) === normalize(b);
+
+        // ---------- pick ONE best analog ----------
+        const getBestAnalog = (
+          analogs,
+          partData,
+          { strict = 0.95, fallback = 0.9 } = {}
+        ) => {
+          let best = { product: null, score: 0 };
+
+          for (const product of analogs) {
+            if (!brandEqual(product?.brand, partData?.brand)) continue;
+
+            const score = nameSimilarity(product?.name, partData?.partName);
+
+            if (score > best.score) {
+              best = { product, score };
+            }
+          }
+
+          if (best.product && best.score >= strict) return best.product;
+          if (best.product && best.score >= fallback) return best.product;
+          return null;
+        };
+
+        console.log(
+          "chatData: ",
+          chatDoc.chatData.flatMap((item) => item.analogs)
+        );
+
         const enrichedParts = partNumbers.map((requestedPart) => {
-          // Find best match: brand + name (case-insensitive)
-          const match = allAvailableParts.find(
-            (p) => p.brand?.toLowerCase() === requestedPart.brand?.toLowerCase()
+          const bestMatch = getBestAnalog(
+            chatDoc.chatData.flatMap((item) => item.analogs),
+            {
+              brand: requestedPart.brand,
+              partName: requestedPart.partName,
+            },
+            {
+              strict: 0.95,
+              fallback: 0.9,
+            }
           );
 
-          if (!match) {
+          if (!bestMatch) {
             console.warn("Ordered part not found in chatData:", requestedPart);
-            // Still allow ordering with minimal data if needed
             return {
               ...requestedPart,
               article: null,
@@ -988,26 +1148,27 @@ Available parts data: ${resText}`,
             };
           }
 
-          // Find the stock info that matches the price (optional but useful)
           let selectedStock = null;
-          if (match.stocks && match.stocks.length > 0) {
-            // Flatten stocks if nested (your current structure has stocks: [ [ {...}, {...} ] ])
-            const flatStocks = match.stocks.flat();
-            selectedStock = flatStocks.find(
-              (stock) => stock.partPrice === requestedPart.partPrice
-            );
+          if (bestMatch.stocks && bestMatch.stocks.length > 0) {
+            const flatStocks = bestMatch.stocks.flat();
+            selectedStock =
+              flatStocks.find(
+                (stock) => stock.partPrice === requestedPart.partPrice
+              ) ||
+              flatStocks[0] ||
+              null;
           }
 
           return {
-            brand: match.brand,
-            partName: match.name,
+            brand: bestMatch.brand,
+            partName: bestMatch.name,
             orderQuantity: requestedPart.orderQuantity,
             partPrice: requestedPart.partPrice,
-            article: match.article,
-            guid: match.guid,
-            pictures: match.pictures,
-            stockInfo:
-              selectedStock || (match.stocks ? match.stocks.flat()[0] : null),
+            article: bestMatch.article,
+            guid: bestMatch.guid,
+            pictures: bestMatch.pictures,
+            stockInfo: selectedStock,
+            sources: bestMatch.sources,
           };
         });
 
@@ -1019,7 +1180,7 @@ Available parts data: ${resText}`,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              parts: enrichedParts, // ✅ Now includes full data from chatData
+              parts: enrichedParts,
               user: userData,
             }),
           });

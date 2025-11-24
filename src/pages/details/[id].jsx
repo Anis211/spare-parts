@@ -7,7 +7,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/admin/ui/card";
-import { CheckCircle2, Package, Truck, CreditCard } from "lucide-react";
+import {
+  CheckCircle2,
+  Package,
+  Truck,
+  CreditCard,
+  CircleOff,
+} from "lucide-react";
 import DotWave from "@/components/custom/DotWave";
 import { useRouter } from "next/router";
 
@@ -71,11 +77,15 @@ const Index = () => {
                       key={item.partNumber}
                       className="flex gap-4 p-4 rounded-lg transition-colors bg-[hsl(217_33%_22%/0.3)] hover:bg-[hsl(217_33%_22%/0.5)]"
                     >
-                      <img
-                        src={item.imageUrls[0]}
-                        alt={item.partName}
-                        className="w-20 h-20 object-cover rounded-lg"
-                      />
+                      {item.imageUrls[0] != null ? (
+                        <img
+                          src={item.imageUrls[0]}
+                          alt={item.partName}
+                          className="w-20 h-20 object-cover rounded-lg"
+                        />
+                      ) : (
+                        <CircleOff className="w-20 h-20 object-cover rounded-lg" />
+                      )}
                       <div className="flex-1">
                         <h3 className="font-semibold text-[hsl(210_40%_98%)]">
                           {item.partName + " - " + item.brand}

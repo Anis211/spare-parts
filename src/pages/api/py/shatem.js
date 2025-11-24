@@ -305,6 +305,7 @@ export default async function handler(req, res) {
           offers.push({
             name: info.description || info.descriptionFormatted || "",
             article: info.article || info.itemNumber || "",
+            guid: info.id,
             partInfo: info,
             priceId: pr.priceId,
             price: pr.price,

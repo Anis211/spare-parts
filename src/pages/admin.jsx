@@ -3,6 +3,7 @@ import Orders from "@/components/admin/Orders";
 import Workers from "@/components/admin/Workers";
 import Setting from "@/components/admin/Settings";
 import AddDeliveryWorker from "@/components/admin/CreateWorker";
+import SearchTab from "@/components/admin/SearchTab";
 import {
   LayoutDashboard,
   Package,
@@ -12,6 +13,7 @@ import {
   LogOut,
   StickyNote,
   Pickaxe,
+  SquareMenu,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
@@ -54,6 +56,7 @@ export default function Index() {
             { title: "Dashboard", icon: LayoutDashboard },
             { title: "Orders", icon: Package },
             { title: "Delivery Workers", icon: Users },
+            { title: "Search Panel", icon: SquareMenu },
             { title: "Add Worker", icon: Pickaxe },
             { title: "Settings", icon: Settings },
             { title: "Main Page", icon: StickyNote },
@@ -121,6 +124,7 @@ export default function Index() {
         {activeTab == "Delivery" && <Workers />}
         {activeTab == "Settings" && <Setting />}
         {activeTab == "Add" && <AddDeliveryWorker />}
+        {activeTab == "Search" && <SearchTab />}
       </motion.div>
     </div>
   );

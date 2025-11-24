@@ -31,6 +31,18 @@ export default async function handler(req, res) {
         console.log(stockData);
         console.log(parts);
 
+        const place = (part, source) => {
+          if (source == "rossko") {
+            return `https://ns.rossko.ru/product?sid=4920cdb501d67a6787a1dc6229b7af50&q=${
+              part.article
+            }&text=${part?.guid || ""}`;
+          } else if (source == "shatem") {
+            return `https://shate-m.kz/personal/search/part/${part?.guid}`;
+          } else if (source == "alatrade") {
+            return `https://etp.alatrade.kz/`;
+          }
+        };
+
         items.push({
           partNumber: part.article,
           partName: part.partName,
@@ -40,9 +52,7 @@ export default async function handler(req, res) {
           imageUrls: part.pictures,
           fromStock: fromStock,
           place: !fromStock
-            ? `https://ns.rossko.ru/product?sid=4920cdb501d67a6787a1dc6229b7af50&q=${
-                part.article
-              }&text=${part?.guid || ""}`
+            ? place(part, part.sources[0])
             : stockData.part.place,
         });
       }
