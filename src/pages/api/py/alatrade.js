@@ -27,7 +27,7 @@ function runPythonOnce(args, { timeoutMs = TIMEOUT_MS } = {}) {
     const pr = spawn(pythonExecutable, ["-u", ...args], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: pyCwd, // so relative imports/files work as when you run it manually
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" },
       windowsHide: true,
     });
 
@@ -90,14 +90,36 @@ async function runPythonJSONWithRetry(args, opts = {}) {
       console.log(`[${label}] attempt ${i}/${attempts}`);
       const out = await runPythonOnce(args, { timeoutMs });
       if (!out) throw new Error("Empty output from Python script");
+
+      // First try to parse whole output as JSON (script should ideally print only JSON).
       try {
-        // If your script prints logs + JSON, ensure it prints ONLY JSON.
-        // If not, you can try to parse the last JSON-looking line:
-        // const lastLine = out.split(/\r?\n/).filter(Boolean).slice(-1)[0] || "";
-        // return JSON.parse(lastLine);
-        return JSON.parse(out);
+        const parsed = JSON.parse(out);
+
+        // Treat empty array as transient (retry) — adjust only if your script's empty array is truly valid.
+        if (Array.isArray(parsed) && parsed.length === 0) {
+          throw new Error("Python returned empty array (transient)");
+        }
+
+        return parsed;
       } catch (e) {
-        throw new Error("Invalid JSON output from Python script");
+        // Fallback: maybe the script emitted logs + JSON — try parsing the last non-empty line.
+        try {
+          const lines = out
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const last = lines.length ? lines[lines.length - 1] : "";
+          if (!last) throw new Error("No JSON-like line to parse");
+          const parsedLast = JSON.parse(last);
+
+          if (Array.isArray(parsedLast) && parsedLast.length === 0) {
+            throw new Error("Python returned empty array (transient)");
+          }
+
+          return parsedLast;
+        } catch (e2) {
+          throw new Error("Invalid JSON output from Python script");
+        }
       }
     } catch (err) {
       console.warn(`[${label}] failed attempt ${i}: ${err.message}`);

@@ -9,10 +9,16 @@ import {
 import { Label } from "@/components/admin/ui/label";
 import { Input } from "@/components/admin/ui/input";
 import { Button } from "@/components/admin/ui/button";
+import { motion } from "framer-motion";
 
 const Setting = () => {
   return (
-    <div className="p-6 space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.7, type: "spring" }}
+      className="p-6 space-y-6"
+    >
       <div className="flex items-center gap-3">
         <div className="h-12 w-12 rounded-lg bg-[hsl(45_100%_51%)]/10 flex items-center justify-center">
           <SettingsIcon className="h-6 w-6 text-[hsl(45_100%_51%)]" />
@@ -88,7 +94,7 @@ const Setting = () => {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

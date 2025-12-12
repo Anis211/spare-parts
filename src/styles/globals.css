@@ -42,3 +42,18 @@ html::-webkit-scrollbar-track {
   border-radius: 10px;
   background-color: #1b1c23;
 }
+
+.scrollbar::-webkit-scrollbar {
+  height: 4px;
+  width: 8px;
+}
+
+.scrollbar::-webkit-scrollbar-track {
+  background-color: hsl(220 75% 12%);
+  border-radius: 20px;
+}
+
+.scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background-color: hsl(220 60% 20%);
+}

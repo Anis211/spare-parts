@@ -7,6 +7,11 @@ const useUser = create(
       user: { id: "incognito" },
       setUser: (newOne) => set(() => ({ user: newOne })),
       clearUser: () => set(() => ({ user: { id: "incognito" } })),
+
+      vin: "",
+      setVin: (newVin) => set(() => ({ vin: newVin })),
+      clearVin: () => set(() => ({ vin: "" })),
+
       liked: {},
       addLiked: (key, value) =>
         set((state) => ({ liked: { ...state.liked, [key]: value } })),
@@ -23,6 +28,7 @@ const useUser = create(
             : { liked: {} }
         ),
       clearLiked: () => set(() => ({ liked: {} })),
+
       cart: {},
       changeCart: (id, value) =>
         set((state) => ({
@@ -45,9 +51,11 @@ const useUser = create(
             : { cart: {} }
         ),
       clearCart: () => set(() => ({ cart: {} })),
+
       languange: true,
       changeLanguage: () => set((state) => ({ language: !state.language })),
       chat: [{ isUser: false, text: "How can i assist you today?" }],
+
       changeChat: (message) =>
         set((state) => ({ chat: [...state.chat, message] })),
       clearChat: () =>

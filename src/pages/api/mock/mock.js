@@ -13,8 +13,9 @@ const mockDb = {
     "Wiper Blade Front": "1010240-00-D",
   },
   WBA8E1C56GNT12345: {
+    "Tie Rod": "CRG-32",
     "Brake Pad Front": "34116791193",
-    "Oil Filter": "11427987859",
+    "Oil Filter": "ELH4364",
     "Air Filter": "13717593720",
   },
 };

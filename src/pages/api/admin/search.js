@@ -8,7 +8,12 @@ import {
 import { createLimitedCaller } from "@/lib/limiterBackoff";
 import Semaphore from "@/lib/bulkhead";
 import CircuitBreaker from "@/lib/circuitBreaker";
+import connectDB from "@/lib/mongoose";
+import VinData from "@/models/AdminChat";
 
+connectDB();
+
+// === OpenAI Client Initialization ===
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   timeout: 30000,
@@ -149,6 +154,19 @@ export default async function handler(req, res) {
       temperature: 0,
     });
     partNumber = aiResponse.choices[0].message.content.trim();
+
+    const history = await VinData.findOne({ vin: vin.toUpperCase() });
+    const part = history.records.find((r) => r.user.part === partName);
+
+    console.log("Existing Part in History:", part);
+    console.log("Full History Records:", history.records);
+
+    if (part != undefined) {
+      return res.status(200).json({
+        message: "This part had already been searched",
+        answer: part,
+      });
+    }
 
     if (partNumber === "NOT FOUND") {
       throw new Error("No relevant part found for the given name");

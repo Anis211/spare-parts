@@ -143,7 +143,9 @@ export default async function handler(req, res) {
       content: text,
     }));
 
-    const pastMessages = await Chat.find({}).sort({ createdAt: -1 }).limit(3);
+    const pastMessages = await Chat.find({ user: user })
+      .sort({ createdAt: -1 })
+      .limit(3);
     let messages = [
       {
         role: "system",

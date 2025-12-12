@@ -1,70 +1,122 @@
+// pages/api/py/alatrade.js
 import { spawn } from "child_process";
 import path from "path";
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 2000; // 2 seconds wait
+export const config = { api: { bodyParser: true } };
 
-// Helper to wait
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_ATTEMPTS = 3;
+const TIMEOUT_MS = 120_000;
+const INITIAL_DELAY = 700;
+const BACKOFF = 1.7;
 
-// Helper to run the script once
-function runPythonScript(pythonExecutable, scriptPath) {
+// --- Python exe resolver (Windows dev vs Linux/macOS prod)
+function resolvePythonExe() {
+  if (process.env.PYTHON_EXE) return process.env.PYTHON_EXE;
+  if (process.platform === "win32") {
+    return path.join(process.cwd(), "python", "Scripts", "python.exe");
+  }
+  return "python3";
+}
+
+// --- run once and return stdout as string
+function runPythonOnce(args, { timeoutMs = TIMEOUT_MS } = {}) {
+  const pythonExecutable = resolvePythonExe();
+  const pyCwd = path.join(process.cwd(), "python");
+
   return new Promise((resolve, reject) => {
-    const pythonProcess = spawn(pythonExecutable, [scriptPath]);
+    const pr = spawn(pythonExecutable, ["-u", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: pyCwd,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        PYTHONUTF8: "1",
+      },
+      windowsHide: true,
+    });
 
     let stdoutData = "";
     let stderrData = "";
+    let timedOut = false;
 
-    pythonProcess.stdout.on("data", (data) => {
-      stdoutData += data.toString("utf8");
+    const killer = setTimeout(() => {
+      timedOut = true;
+      try {
+        pr.kill("SIGTERM");
+      } catch {}
+    }, timeoutMs);
+
+    pr.stdout.on("data", (chunk) => {
+      stdoutData += chunk.toString("utf8");
+    });
+    pr.stderr.on("data", (chunk) => {
+      const s = chunk.toString("utf8");
+      stderrData += s;
+      console.error("[Python stderr]:", s);
     });
 
-    pythonProcess.stderr.on("data", (data) => {
-      stderrData += data.toString();
-      console.error("[Python stderr]:", data.toString());
-    });
-
-    pythonProcess.on("close", (code) => {
-      if (code === 0) {
-        const out = (stdoutData || "").trim();
-
-        if (!out) {
-          return reject(new Error("Python script returned empty output"));
-        }
-
-        try {
-          const parsedData = JSON.parse(out);
-
-          // TRIGGER RETRY if array is empty
-          if (Array.isArray(parsedData) && parsedData.length === 0) {
-            return reject(new Error("Python script returned empty array"));
-          }
-
-          resolve(parsedData);
-        } catch (e) {
-          console.error("Failed to parse Python output:", e);
-          reject(new Error("Invalid JSON output from Python script"));
-        }
-      } else {
-        reject(
-          new Error(
-            stderrData.trim() || `Python script exited with code ${code}`
-          )
-        );
-      }
-    });
-
-    pythonProcess.on("error", (err) => {
+    pr.on("error", (err) => {
+      clearTimeout(killer);
       reject(new Error(`Failed to start Python: ${err.message}`));
     });
 
-    setTimeout(() => {
-      pythonProcess.kill("SIGTERM");
-      reject(new Error("Python script timed out after 30 seconds"));
-    }, 30000);
+    pr.on("close", (code) => {
+      clearTimeout(killer);
+      if (timedOut) return reject(new Error("Python script timed out"));
+      if (code !== 0) {
+        return reject(
+          new Error(
+            (stderrData && stderrData.trim()) ||
+              `Python script exited with code ${code}`
+          )
+        );
+      }
+      resolve((stdoutData || "").trim());
+    });
   });
 }
 
+// --- retry wrapper that parses JSON and treats empty/empty-array as retryable
+async function runPythonJSONWithRetry(args, opts = {}) {
+  const {
+    attempts = MAX_ATTEMPTS,
+    timeoutMs = TIMEOUT_MS,
+    initialDelay = INITIAL_DELAY,
+    backoff = BACKOFF,
+    label = "python",
+  } = opts;
+
+  let lastErr;
+  let delay = initialDelay;
+
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      console.log(`[${label}] attempt ${i}/${attempts}`);
+      const out = await runPythonOnce(args, { timeoutMs });
+      if (!out) throw new Error("Empty output from Python script");
+
+      // Python must print ONLY JSON
+      const parsed = JSON.parse(out);
+
+      // If the result is an array and empty, treat it as transient and retry
+      if (Array.isArray(parsed) && parsed.length === 0) {
+        throw new Error("Python returned empty array (retrying)");
+      }
+
+      return parsed;
+    } catch (err) {
+      console.warn(`[${label}] failed attempt ${i}: ${err.message}`);
+      lastErr = err;
+      if (i < attempts) {
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.ceil(delay * backoff);
+      }
+    }
+  }
+  throw lastErr || new Error(`[${label}] failed after ${attempts} attempts`);
+}
+
+// --- API handler
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -72,42 +124,32 @@ export default async function handler(req, res) {
 
   console.log("Started alatrade_auth proxy");
 
-  const pythonExecutable = path.join(
-    process.cwd(),
-    "python",
-    "Scripts",
-    "python.exe"
-  );
   const scriptPath = path.join(process.cwd(), "python", "alatrade_auth.py");
 
-  let lastError = null;
+  try {
+    // call the script (no extra args). If you need to pass args add them to the array.
+    const authData = await runPythonJSONWithRetry([scriptPath], {
+      attempts: MAX_ATTEMPTS,
+      timeoutMs: TIMEOUT_MS,
+      initialDelay: INITIAL_DELAY,
+      backoff: BACKOFF,
+      label: "alatrade-auth",
+    });
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(
-        `[Alatrade Auth Attempt ${attempt}/${MAX_RETRIES}] Running script...`
-      );
-      const products = await runPythonScript(pythonExecutable, scriptPath);
+    console.log(
+      "[alatrade-auth] success:",
+      Array.isArray(authData) ? `array(${authData.length})` : typeof authData
+    );
 
-      console.log(`[Alatrade Auth Attempt ${attempt}] Success.`);
-      console.log(`[Alatrade Auth Attempt ${attempt}] results: `, products);
-      return res.status(200).json({ auth_data: products });
-    } catch (error) {
-      console.warn(
-        `[Alatrade Auth Attempt ${attempt}] Failed: ${error.message}`
-      );
-      lastError = error;
-
-      if (attempt < MAX_RETRIES) {
-        console.log(`Waiting ${RETRY_DELAY_MS}ms before retry...`);
-        await wait(RETRY_DELAY_MS);
-      }
-    }
+    return res.status(200).json({
+      auth_data: authData,
+      attempts: MAX_ATTEMPTS,
+    });
+  } catch (e) {
+    console.error("All alatrade auth attempts failed.", e);
+    return res.status(500).json({
+      error: "Failed to retrieve auth data after multiple attempts",
+      details: e.message || "Unknown error",
+    });
   }
-
-  console.error("All alatrade auth attempts failed.");
-  return res.status(500).json({
-    error: "Failed to retrieve auth data after multiple attempts",
-    details: lastError ? lastError.message : "Unknown error",
-  });
 }

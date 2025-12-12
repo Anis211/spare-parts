@@ -41,29 +41,31 @@ export default function Layout({ children }) {
   const toggleChat = async () => {
     setIsChatOpen(!isChatOpen);
 
-    try {
-      const response = await fetch("/api/chat/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user: user.id }),
-      });
-      const data = await response.json();
+    if (messages.length <= 1) {
+      try {
+        const response = await fetch("/api/chat/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user: user.id }),
+        });
+        const data = await response.json();
 
-      console.log(data);
+        console.log(data);
 
-      if (data.chat) {
-        setMessages((prev) => [
-          ...prev,
-          ...data.chat.map((msg) => ({
-            isUser: msg.metadata.role === "user",
-            text: msg.text,
-          })),
-        ]);
-      } else {
-        return null;
+        if (data.chat) {
+          setMessages((prev) => [
+            ...prev,
+            ...data.chat.map((msg) => ({
+              isUser: msg.metadata.role === "user",
+              text: msg.text,
+            })),
+          ]);
+        } else {
+          return null;
+        }
+      } catch (error) {
+        console.error("Error fetching messages:", error);
       }
-    } catch (error) {
-      console.error("Error fetching messages:", error);
     }
   };
 

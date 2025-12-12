@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/admin/ui/select";
+import { motion } from "framer-motion";
 
 const Orders = () => {
   const [loading, setLoading] = useState(true);
@@ -43,7 +44,12 @@ const Orders = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.7, type: "spring" }}
+      className="p-6 space-y-6"
+    >
       <div className="flex items-center gap-3">
         <div className="h-12 w-12 rounded-lg bg-[hsl(45_100%_51%)]/10 flex items-center justify-center">
           <Package className="h-6 w-6 text-[hsl(45_100%_51%)]" />
@@ -84,7 +90,7 @@ const Orders = () => {
         searchQuery={searchQuery}
         statusFilter={statusFilter}
       />
-    </div>
+    </motion.div>
   );
 };
 

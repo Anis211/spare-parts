@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { motion } from "framer-motion";
 
 export default function AddDeliveryWorker() {
   const [name, setName] = useState("");
@@ -35,7 +36,12 @@ export default function AddDeliveryWorker() {
   };
 
   return (
-    <section className="p-6">
+    <motion.section
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.7, type: "spring" }}
+      className="p-6"
+    >
       <div className="max-w-md mx-auto bg-white rounded-xl shadow-sm p-6 space-y-4 bg-[hsl(220_60%_20%)]">
         <h3 className="text-lg font-semibold text-[hsl(45_100%_95%)]">
           Add Delivery Worker
@@ -99,6 +105,6 @@ export default function AddDeliveryWorker() {
           Create Worker Account
         </button>
       </div>
-    </section>
+    </motion.section>
   );
 }

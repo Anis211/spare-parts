@@ -4,6 +4,7 @@ import { Package, TruckIcon, Users, DollarSign } from "lucide-react";
 import StatCard from "@/components/admin/StatCard";
 import OrdersTable from "@/components/admin/OrdersTable";
 import WorkersTable from "@/components/admin/WorkersTable";
+import { motion } from "framer-motion";
 
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
@@ -46,7 +47,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.7, type: "spring" }}
+      className="p-6 space-y-6"
+    >
       <div>
         <h2 className="text-3xl font-bold text-[hsl(45_100%_95%)] mb-2">
           Dashboard Overview
@@ -98,6 +104,6 @@ export default function Dashboard() {
           <WorkersTable workers={workers} />
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

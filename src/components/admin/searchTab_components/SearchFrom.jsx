@@ -13,6 +13,8 @@ import {
 } from "@/components/admin/ui/form";
 import { Input } from "@/components/admin/ui/search_input";
 import { toast } from "sonner";
+import useUser from "@/zustand/user";
+import { useEffect } from "react";
 
 const formSchema = z.object({
   partName: z
@@ -33,14 +35,19 @@ export default function SearchForm({ setResults, setIsLoading }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [fileName, setFileName] = useState(null);
   const [image, setImage] = useState(null);
+  const vin = useUser((state) => state.vin);
 
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       partName: "",
-      vinCode: "",
+      vinCode: vin.length > 0 ? vin : "",
     },
   });
+
+  useEffect(() => {
+    form.setValue("vinCode", vin);
+  }, [vin]);
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -112,17 +119,56 @@ export default function SearchForm({ setResults, setIsLoading }) {
       });
       const result = await res.json();
 
-      setResults((prev) => [
-        {
-          user: {
-            part: data.partName,
-            vin: data.vinCode.toUpperCase(),
-            userImages: imageUrls,
+      if (result.answer != undefined) {
+        setResults((prev) => {
+          const existingIndex = prev.findIndex(
+            (r) => r.user.part === result.answer.user.part
+          );
+
+          let newResults;
+          if (existingIndex !== -1) {
+            const withoutExisting = [
+              ...prev.slice(0, existingIndex),
+              ...prev.slice(existingIndex + 1),
+            ];
+            newResults = [result.answer, ...withoutExisting];
+          } else {
+            newResults = [result.answer, ...prev];
+          }
+
+          return newResults;
+        });
+      } else {
+        setResults((prev) => [
+          {
+            user: {
+              part: data.partName,
+              vin: data.vinCode.toUpperCase(),
+              userImages: imageUrls,
+            },
+            items: { original: result.original, analogs: result.analogs },
           },
-          items: { original: result.original, analogs: result.analogs },
-        },
-        ...prev,
-      ]);
+          ...prev,
+        ]);
+
+        const answer = await fetch("/api/admin/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            data: {
+              user: {
+                part: data.partName,
+                vin: data.vinCode.toUpperCase(),
+                userImages: imageUrls,
+              },
+              items: { original: result.original, analogs: result.analogs },
+            },
+          }),
+        });
+
+        const saveResult = await answer.json();
+        console.log("Save Result: ", saveResult);
+      }
 
       toast.success("Part information submitted successfully!", {
         description: `${data.partName} - VIN: ${data.vinCode.toUpperCase()}`,
@@ -168,7 +214,7 @@ export default function SearchForm({ setResults, setIsLoading }) {
                 <FormItem className="flex-1 space-y-0">
                   <FormControl>
                     <Input
-                      placeholder="VIN Code (17 chars)"
+                      placeholder={vin.length > 0 ? vin : "VIN Code (17 chars)"}
                       className="border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 h-10 text-white uppercase font-mono tracking-wider placeholder:text-white"
                       maxLength={17}
                       {...field}
