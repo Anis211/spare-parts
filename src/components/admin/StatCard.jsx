@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/admin/ui/card";
 
 export default function StatCard({ title, value, icon: Icon, trend }) {
   return (
-    <Card className="border-[hsl(220_50%_25%)]">
+    <Card className="border border-[hsl(222_30%_18%)] bg-[hsl(222_47%_9%)]">
       <CardContent className="p-6">
         <div className="flex items-center justify-between gap-12">
           <div>

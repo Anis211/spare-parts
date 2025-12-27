@@ -27,7 +27,14 @@ export default async function handler(req, res) {
         // Push new record
         await VinData.findOneAndUpdate(
           { vin: vinCode },
-          { $push: { records: data } },
+          {
+            $push: {
+              records: {
+                $each: [data],
+                $position: 0,
+              },
+            },
+          },
           { new: true }
         );
       }
@@ -53,7 +60,11 @@ export default async function handler(req, res) {
         vinData = await VinData.findOne({ vin: vinCode });
         console.log("Fetched VIN Data for:", vinCode);
       } else {
-        vinData = await VinData.find().limit(limit);
+        vinData = await VinData.find()
+          .sort({
+            createdAt: -1,
+          })
+          .limit(limit);
       }
 
       if (!vinData) {
@@ -66,7 +77,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Internal server error" });
     }
   } else if (req.method === "PUT") {
-    const { result } = req.body;
+    const { result, length } = req.body;
 
     if (!result) {
       console.log("Delete Request Missing Results:", result);
@@ -74,10 +85,14 @@ export default async function handler(req, res) {
     }
 
     try {
-      await VinData.updateOne(
-        { vin: result.user.vin.toUpperCase() },
-        { $pull: { records: result } }
-      );
+      if (length > 1) {
+        await VinData.updateOne(
+          { vin: result.user.vin.toUpperCase() },
+          { $pull: { records: result } }
+        );
+      } else {
+        await VinData.deleteOne({ vin: result.user.vin.toUpperCase() });
+      }
       return res.status(200).json({ message: "Result deleted successfully" });
     } catch (error) {
       console.error(error);

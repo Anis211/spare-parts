@@ -36,6 +36,7 @@ const formatDeliveryDate = (dateStr) => {
 
 export const AnalogResultCard = ({ part, isSelected, onToggleSelect }) => {
   const sourceName = part.sources[0] || "Unknown";
+  const percentage = 88;
 
   return (
     <Card className="bg-[hsl(220_75%_12%)] border-[hsl(217_26%_25%)] overflow-hidden">
@@ -126,10 +127,10 @@ export const AnalogResultCard = ({ part, isSelected, onToggleSelect }) => {
                   <div className="text-sm">
                     <p className="text-[hsl(215_20%_65%)]">Delivery:</p>
                     <p className="text-[hsl(210_40%_98%)]">
-                      {formatDeliveryDate(stock.delivery.start)}
-                      {stock.delivery.end &&
-                        stock.delivery.end !== stock.delivery.start &&
-                        ` - ${formatDeliveryDate(stock.delivery.end)}`}
+                      {formatDeliveryDate(stock?.delivery?.start)}
+                      {stock?.delivery?.end &&
+                        stock?.delivery?.end !== stock?.delivery?.start &&
+                        ` - ${formatDeliveryDate(stock?.delivery?.end)}`}
                     </p>
                   </div>
                 </div>
@@ -140,11 +141,24 @@ export const AnalogResultCard = ({ part, isSelected, onToggleSelect }) => {
 
         {/* Images Section */}
         <div className="p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Package className="w-5 h-5 text-[hsl(38_92%_50%)]" />
-            <h3 className="text-[hsl(38_92%_50%)] font-semibold text-lg">
-              Images
-            </h3>{" "}
+          <div className="flex flex-row justify-between">
+            <div className="flex items-center gap-2 mb-4">
+              <Package className="w-5 h-5 text-[hsl(38_92%_50%)]" />
+              <h3 className="text-[hsl(38_92%_50%)] font-semibold text-lg">
+                Images
+              </h3>
+            </div>
+            <div
+              className={`h-[8%] text-sm text-black font-inter font-semibold flex items-center justify-center hover:bg-[hsl(220_70%_25%)]/80 hover:text-white/95 transition-colors duration-150 rounded-full px-3 py-1 ${
+                percentage > 80
+                  ? "bg-[hsl(140_70%_50%)]/90"
+                  : percentage < 80 && percentage > 50
+                  ? "bg-[hsl(45_100%_55%)]/90"
+                  : "bg-[hsl(0_70%_55%)]/90 text-white/85"
+              } `}
+            >
+              78% Match
+            </div>
           </div>
 
           {part.pictures.length > 0 ? (

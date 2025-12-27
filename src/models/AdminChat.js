@@ -70,6 +70,12 @@ const recordSchema = new Schema(
   {
     user: userSchema,
     items: itemsSchema,
+    createdAt: {
+      type: Date,
+      default: () => new Date(),
+      immutable: true,
+      get: (v) => (v instanceof Date ? v.toISOString() : v),
+    },
   },
   { _id: false }
 );
@@ -78,11 +84,15 @@ const recordSchema = new Schema(
 const VinSchema = new Schema(
   {
     vin: { type: String, unique: true, required: true, uppercase: true },
+    phoneNumber: {
+      type: String,
+      match: [/^\+[1-9]\d{1,14}$/, "Invalid phone number"],
+      default: "",
+    },
     records: { type: [recordSchema], default: [] },
   },
   { timestamps: true }
 );
-
 const VinData = mongoose.models.VinData || mongoose.model("VinData", VinSchema);
 
 export default VinData;

@@ -194,7 +194,7 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className="flex flex-col min-h-[100vh] bg-[hsl(220_70%_15%)]">
+    <div className="flex flex-col min-h-[100vh] bg-[hsl(222_47%_6%)]">
       {!router.asPath.includes("/admin") && <Navbar />}
 
       {children}
@@ -208,7 +208,7 @@ export default function Layout({ children }) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 30 }}
                 transition={{ duration: 0.4, type: "spring" }}
-                className=" bg-gradient-to-r from-[#0C1F54]/90 to-[#040E26]/90 backdrop-blur-md text-black rounded-lg shadow-xl w-[30vw] transition-all duration-300 ease-in-out"
+                className="bg-gradient-to-r from-[#0C1F54]/90 to-[#040E26]/90 backdrop-blur-md text-black rounded-lg shadow-xl w-[30vw] transition-all duration-300 ease-in-out"
               >
                 <div className="bg-yellow-400 p-4 flex justify-between items-center rounded-t-md">
                   <h3 className="font-bold text-black">Chat with us</h3>

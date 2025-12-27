@@ -21,7 +21,7 @@ export const SelectedAnalogsSidebar = ({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -40 }}
       transition={{ duration: 0.6, type: "spring" }}
-      className="fixed left-[74%] w-[25%] backdrop-blur-md border-1 border-white/25 bg-[hsl(220_60%_20%)]/65 rounded-lg max-h-[70vh] flex flex-col"
+      className="fixed left-[74%] top-[8%] w-[25%] backdrop-blur-md border-1 border-white/25 bg-[hsl(220_60%_20%)]/65 rounded-lg max-h-[70vh] flex flex-col"
     >
       <div className="p-6 border-b-2 border-white/50">
         <div className="flex items-center justify-between mb-2">

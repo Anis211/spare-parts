@@ -3,9 +3,9 @@ import SearchResults from "./searchTab_components/SearchResults";
 import { useState, useEffect } from "react";
 import { SelectedAnalogsSidebar } from "./searchTab_components/SelectedAnalogs";
 import { ListChecks } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 
-export default function SearchTab({ results, setResults }) {
+export default function SearchTab({ results, setResults, setRecentSearches }) {
   const [wraped, setWraped] = useState({});
 
   const [isLoading, setIsLoading] = useState(false);
@@ -61,22 +61,29 @@ export default function SearchTab({ results, setResults }) {
       transition={{ duration: 0.7, type: "spring" }}
       className="flex flex-col gap-3"
     >
-      <SearchForm setResults={setResults} setIsLoading={setIsLoading} />
+      <SearchForm
+        results={results}
+        setResults={setResults}
+        setRecentSearches={setRecentSearches}
+        setIsLoading={setIsLoading}
+      />
       <div className="flex flex-row">
-        {!openList && results.length > 0 && (
-          <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, type: "spring" }}
-            layout
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setOpenList(true)}
-            className="fixed left-[95%] top-[20%] w-12 h-12 z-30 p-1 rounded-xl bg-[hsl(220_75%_12%)]/65 border-1 border-white/45 text-white hover:bg-[hsl(38_92%_50%)] hover:text-[hsl(220_75%_12%)] transition-colors flex items-center justify-center"
-          >
-            <ListChecks className="w-6 h-6" />
-          </motion.button>
-        )}
+        <AnimatePresence>
+          {!openList && results.length > 0 && (
+            <motion.button
+              initial={{ opacity: 0, x: -40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -40 }}
+              transition={{ duration: 0.4, type: "spring" }}
+              layout
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setOpenList(true)}
+              className="fixed left-[95%] top-[9%] w-12 h-12 z-30 p-1 rounded-xl bg-[hsl(220_75%_12%)]/65 border-1 border-white/45 text-white hover:bg-[hsl(38_92%_50%)] hover:text-[hsl(220_75%_12%)] transition-colors flex items-center justify-center"
+            >
+              <ListChecks className="w-6 h-6" />
+            </motion.button>
+          )}
+        </AnimatePresence>
         <SearchResults
           results={results}
           setResults={setResults}
@@ -86,17 +93,20 @@ export default function SearchTab({ results, setResults }) {
           selectedIds={selectedIds}
           setSelectedIds={setSelectedIds}
           handleRemove={handleRemove}
+          setRecentSearches={setRecentSearches}
         />
-        {results.length > 0 && openList ? (
-          <SelectedAnalogsSidebar
-            selectedParts={selectedParts}
-            onRemove={handleRemove}
-            onClear={handleClear}
-            setOpenList={setOpenList}
-          />
-        ) : (
-          ""
-        )}
+        <AnimatePresence>
+          {results.length > 0 && openList ? (
+            <SelectedAnalogsSidebar
+              selectedParts={selectedParts}
+              onRemove={handleRemove}
+              onClear={handleClear}
+              setOpenList={setOpenList}
+            />
+          ) : (
+            ""
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );

@@ -75,51 +75,11 @@ export default async function handler(req, res) {
   if (req.method != "POST") {
     res.status(500).json("Wrong request method!");
   }
-  const { partName, vin, userImages } = req.body;
+  const { partName, vin } = req.body;
   let partNumber = "";
 
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
-
-  console.log("User Images:", userImages);
-
-  // If user sent images and did NOT supply a part name, extract from image
-  if (
-    Array.isArray(userImages) &&
-    userImages.length > 0 &&
-    partName === "nothing"
-  ) {
-    // content = text + images (data URLs or http(s) URLs)
-    const content = [
-      {
-        type: "text",
-        text: "Identify the automotive part shown. Respond with ONLY the precise part name (e.g., 'Oil filter', 'Front brake pad', 'Alternator'). No extra words.",
-      },
-      ...userImages.map((url) => ({
-        type: "image_url",
-        image_url: { url }, // must be { type:'image_url', image_url:{ url } }
-      })),
-    ];
-
-    const completion = await llmChat(
-      [
-        {
-          role: "system",
-          content:
-            "You are an expert auto parts identifier. Return ONLY the part name. No punctuation, no extra words, like ('Oil filter', 'Alternator') (the output needs to be in russian language). If you cannot identify, respond with 'Unknown'.",
-        },
-        { role: "user", content },
-      ],
-      { model: "gpt-4o", temperature: 0 }
-    );
-
-    let detected = completion.choices?.[0]?.message?.content?.trim() || "";
-    detected = detected.replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
-
-    if (detected && detected.toLowerCase() !== "unknown") {
-      partName = detected;
-    }
-  }
 
   try {
     console.log("Fetching part number for:", partName, vin);
@@ -156,12 +116,12 @@ export default async function handler(req, res) {
     partNumber = aiResponse.choices[0].message.content.trim();
 
     const history = await VinData.findOne({ vin: vin.toUpperCase() });
-    const part = history.records.find((r) => r.user.part === partName);
-
-    console.log("Existing Part in History:", part);
-    console.log("Full History Records:", history.records);
+    const part = history?.records.find((r) => r.user.part === partName);
 
     if (part != undefined) {
+      console.log("Existing Part in History:", part);
+      console.log("Full History Records:", history.records);
+
       return res.status(200).json({
         message: "This part had already been searched",
         answer: part,

@@ -17,7 +17,7 @@ Table.displayName = "Table";
 const TableHeader = React.forwardRef(({ className, ...props }, ref) => (
   <thead
     ref={ref}
-    className={cn("[&_tr]:border-b border-[hsl(220_50%_25%)]", className)}
+    className={cn("[&_tr]:border-b border-[hsl(222_30%_12%)]", className)}
     {...props}
   />
 ));
@@ -36,7 +36,7 @@ const TableFooter = React.forwardRef(({ className, ...props }, ref) => (
   <tfoot
     ref={ref}
     className={cn(
-      "border-t border-[hsl(220_50%_25%)] bg-[hsl(220_40%_25%)]/50 font-medium [&>tr]:last:border-b-0",
+      "border-t border-[hsl(222_30%_12%)] bg-[hsl(220_40%_25%)]/50 font-medium [&>tr]:last:border-b-0",
       className
     )}
     {...props}

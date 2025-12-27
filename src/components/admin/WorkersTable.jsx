@@ -10,10 +10,10 @@ import { Avatar, AvatarFallback } from "@/components/admin/ui/avatar";
 
 export default function WorkersTable({ workers }) {
   return (
-    <div className="rounded-lg border border-[hsl(220_50%_25%)] overflow-hidden">
+    <div className="rounded-lg border border-[hsl(222_30%_12%)] bg-[hsl(222_47%_9%)] overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow className="bg-[hsl(220_60%_20%)] hover:bg-[hsl(220_60%_20%)]">
+          <TableRow className="bg-[hsl(222_47%_9%)] hover:bg-[hsl(222_30%_12%)]">
             <TableHead className="text-[hsl(45_100%_95%)] font-semibold">
               Worker
             </TableHead>
@@ -32,11 +32,11 @@ export default function WorkersTable({ workers }) {
           {workers.map((worker) => (
             <TableRow
               key={worker.name}
-              className="hover:bg-[hsl(220_60%_20%)]/50 border-b border-[hsl(220_50%_25%)]"
+              className="hover:bg-[hsl(222_30%_12%)] border-b border-[hsl(222_30%_18%)]"
             >
               <TableCell>
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10 bg-[hsl(45_100%_51%)]/20 border-2 border-[hsl(45_100%_51%)]">
+                  <Avatar className="h-10 w-10 bg-[hsl(45_100%_51%)]/20 border-2 border-[hsl(222_30%_18%)]">
                     <AvatarFallback className="text-[hsl(45_100%_51%)] font-semibold bg-transparent">
                       {worker.name.split(" ")[0][0] +
                         worker.name.split(" ")[1][0]}

@@ -12,6 +12,9 @@ const useUser = create(
       setVin: (newVin) => set(() => ({ vin: newVin })),
       clearVin: () => set(() => ({ vin: "" })),
 
+      salesTab: "Shop",
+      setSalesTab: (newSalesTab) => set(() => ({ salesTab: newSalesTab })),
+
       liked: {},
       addLiked: (key, value) =>
         set((state) => ({ liked: { ...state.liked, [key]: value } })),

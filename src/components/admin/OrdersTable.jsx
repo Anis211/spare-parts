@@ -137,10 +137,10 @@ export default function OrdersTable({
   };
 
   return (
-    <div className="rounded-lg border border-[hsl(220_50%_25%)] overflow-hidden">
+    <div className="rounded-lg border border-[hsl(222_30%_18%)] overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow className="bg-[hsl(220_60%_20%)] hover:bg-[hsl(220_60%_20%)]">
+          <TableRow className="border border-[hsl(222_30%_18%)] bg-[hsl(222_47%_9%)] hover:bg-[hsl(222_30%_12%)]">
             {[
               "Order ID",
               "Customer",
@@ -209,7 +209,7 @@ export default function OrdersTable({
                     [ordIndex]: !clicked[ordIndex],
                   }))
                 }
-                className="hover:bg-[hsl(220_60%_20%)]/50 border-b border-[hsl(220_50%_25%)]"
+                className="hover:bg-[hsl(220_60%_20%)]/50 border-b border-[hsl(222_30%_18%)] bg-[hsl(222_47%_9%)]"
               >
                 <TableCell className="font-medium text-[hsl(45_100%_51%)]">
                   {order.orderId}
