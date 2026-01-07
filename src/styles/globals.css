@@ -57,3 +57,26 @@ html::-webkit-scrollbar-track {
   border-radius: 10px;
   background-color: hsl(220 60% 20%);
 }
+
+[data-radix-popper-content-wrapper] [data-radix-select-item] {
+  outline: none;
+}
+[data-radix-popper-content-wrapper] [data-radix-select-item]:focus {
+  background-color: hsl(222 47% 14%) !important;
+  color: hsl(210 40% 98%) !important;
+}
+
+.repair-scrollbar::-webkit-scrollbar {
+  height: 4px;
+  width: 8px;
+}
+
+.repair-scrollbar::-webkit-scrollbar-track {
+  background-color: hsl(220 18% 12%);
+  border-radius: 20px;
+}
+
+.repair-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background-color: hsl(43 96% 56%);
+}

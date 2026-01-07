@@ -315,7 +315,7 @@ export function WorkHistoryModal({ open, onClose, worker }) {
           </div>
         </div>
 
-        <ScrollArea className="h-[400px] pr-4">
+        <ScrollArea className="h-[500px] pr-4">
           {sortedWorks.length === 0 ? (
             <div
               className="text-center py-12"

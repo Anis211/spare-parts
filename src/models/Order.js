@@ -32,10 +32,6 @@ const orderSchema = new mongoose.Schema(
         },
       },
     ],
-    workerData: {
-      id: { type: String, required: true },
-      name: { type: String, required: true },
-    },
     shippingStatus: {
       type: String,
       enum: ["Pending", "Getting There", "Delivered"],

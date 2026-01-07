@@ -601,3 +601,109 @@ export const categoriesData = [
     STR_PATH: "Двигатель > Система подачи воздуха > Воздушный фильтр / корпус",
   },
 ];
+
+// Extract Russian name from path
+const getRussianName = (path) => {
+  const parts = path.split(" > ");
+  return parts[parts.length - 1];
+};
+
+// Transform flat data into tree structure
+export const buildCategoryTree = (data) => {
+  const map = new Map();
+  const roots = [];
+
+  // Create map of all categories
+  data.forEach((item) => {
+    const childCount = data.filter(
+      (d) => d.STR_ID_PARENT === item.STR_ID
+    ).length;
+    map.set(item.STR_ID, {
+      id: item.STR_ID.toString(),
+      rawId: item.STR_ID,
+      name: getRussianName(item.STR_PATH),
+      nameEn: item.STR_NODE_NAME,
+      count: childCount > 0 ? childCount : undefined,
+      children: [],
+      path: item.STR_PATH,
+    });
+  });
+
+  // Build tree structure
+  data.forEach((item) => {
+    const category = map.get(item.STR_ID);
+    if (item.STR_ID_PARENT === null) {
+      roots.push(category);
+    } else {
+      const parent = map.get(item.STR_ID_PARENT);
+      if (parent) {
+        parent.children = parent.children || [];
+        parent.children.push(category);
+      }
+    }
+  });
+
+  // Remove empty children arrays
+  const cleanTree = (categories) => {
+    return categories.map((cat) => ({
+      ...cat,
+      children:
+        cat.children && cat.children.length > 0
+          ? cleanTree(cat.children)
+          : undefined,
+    }));
+  };
+
+  return cleanTree(roots);
+};
+
+export const mockCategories = buildCategoryTree(categoriesData);
+
+const partImages = [
+  "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=200&h=200&fit=crop",
+  "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=200&h=200&fit=crop",
+  "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=200&h=200&fit=crop",
+  "https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=200&h=200&fit=crop",
+];
+
+const brands = [
+  "Bosch",
+  "Denso",
+  "Continental",
+  "Valeo",
+  "Brembo",
+  "SKF",
+  "Gates",
+  "NGK",
+  "Febi",
+  "Lemförder",
+];
+const locations = [
+  "Склад А",
+  "Склад Б",
+  "Центральный",
+  "Региональный",
+  "Транзит",
+];
+
+export const generateMockAnalogs = (categoryName) => {
+  const count = Math.floor(Math.random() * 5) + 3;
+  return Array.from({ length: count }, (_, i) => ({
+    id: `analog-${i}-${Date.now()}`,
+    article: `${categoryName.slice(0, 3).toUpperCase()}${
+      Math.floor(Math.random() * 90000) + 10000
+    }`,
+    partName: `${categoryName} - Аналог ${i + 1}`,
+    brandName: brands[Math.floor(Math.random() * brands.length)],
+    cost: Math.floor(Math.random() * 5000) + 500,
+    currency: "RUB",
+    imageUrl: partImages[Math.floor(Math.random() * partImages.length)],
+    stockPlaces: Array.from(
+      { length: Math.floor(Math.random() * 3) + 1 },
+      () => ({
+        location: locations[Math.floor(Math.random() * locations.length)],
+        quantity: Math.floor(Math.random() * 20) + 1,
+      })
+    ),
+  }));
+};

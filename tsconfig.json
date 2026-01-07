@@ -22,7 +22,9 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    "src/components/admin/AdminSidebar.jsx"
+    "src/components/admin/AdminSidebar.jsx",
+    "src/components/admin/ui/repair/calendar.jsx",
+    "src/components/admin/ui/repair/calendar.jsx"
   ],
   "exclude": ["node_modules"]
 }

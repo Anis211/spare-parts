@@ -66,7 +66,6 @@ export default async function handler(req, res) {
           $expr: { $lt: [{ $size: "$activeOrders" }, 10] },
         });
       }
-      const worker = availableWorkers[0];
       const lastOrder = await Order.findOne().sort({ createdAt: -1 });
 
       let nextNumber = 1;
@@ -94,21 +93,8 @@ export default async function handler(req, res) {
           apartment: null,
         },
         items: items,
-        workerData: {
-          id: worker.id,
-          name: worker.name,
-        },
       });
       await newOrder.save();
-
-      await Worker.findOneAndUpdate(
-        { id: worker.id },
-        {
-          $push: {
-            activeOrders: "ORD-" + formattedNumber,
-          },
-        }
-      );
 
       // Return success response
       res.status(201).json({

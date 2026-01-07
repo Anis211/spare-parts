@@ -163,7 +163,11 @@ export function RepairOrderCard({ setActiveTab, order, style }) {
       <div className="flex items-center justify-between pt-3 border-t border-[hsl(222_30%_18%)]">
         <p className="text-md text-[hsl(220_15%_55%)]">Total Cost</p>
         <p className="text-lg font-bold text-[hsl(40_95%_55%)]">
-          $ {totals.grandTotal.toLocaleString()}
+          ${" "}
+          {totals.grandTotal.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
         </p>
       </div>
     </div>

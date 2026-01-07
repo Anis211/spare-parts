@@ -5,7 +5,7 @@ import { RepairOrderCard } from "@/components/admin/shopSales_components/RepairO
 import { NewOrderDialog } from "@/components/admin/shopSales_components/NewOrderDialog";
 import { sampleOrders } from "@/data/sampleOrders";
 import { useToast } from "@/hooks/use-toast";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 
 function calculateOrderTotals(order) {
   let partsTotal = 0;
@@ -158,7 +158,7 @@ const ShopSales = ({ setActiveTab }) => {
             </p>
             <p className="text-2xl font-bold text-[hsl(40_95%_55%)]">
               $
-              {totalRevenue.toLocaleString(undefined, {
+              {totalRevenue.toLocaleString("en-Us", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}

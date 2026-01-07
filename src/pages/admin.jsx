@@ -1,22 +1,19 @@
-import Dashboard from "@/components/admin/Dashboard";
-import Orders from "@/components/admin/Orders";
-import Workers from "@/components/admin/Workers";
 import Setting from "@/components/admin/Settings";
-import AddDeliveryWorker from "@/components/admin/CreateWorker";
 import SearchTab from "@/components/admin/SearchTab";
 import Category from "@/components/admin/Category";
 import SearchHistory from "@/components/admin/History";
 import ShopSales from "@/components/admin/Sales";
 import RepairWorkers from "@/components/admin/RepairWorkers";
+import Customers from "@/components/admin/Customers";
+import AddCustomer from "@/components/admin/AddCustomer";
+import Stocks from "@/components/admin/Stocks";
+import { CRMProvider } from "@/hooks/CRMContext";
 import {
-  LayoutDashboard,
   Package,
-  Users,
   Settings,
   PanelLeft,
   LogOut,
   StickyNote,
-  Pickaxe,
   SquareMenu,
   Car,
   TextSearch,
@@ -25,6 +22,9 @@ import {
   History,
   ShoppingBag,
   Drill,
+  Users,
+  UserPlus,
+  PackageOpen,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useState, useEffect } from "react";
@@ -33,14 +33,13 @@ import useUser from "@/zustand/user";
 import OrderDetails from "@/components/admin/Details";
 
 const titles = [
-  { title: "Dashboard", icon: LayoutDashboard },
-  { title: "Orders", icon: Package },
-  { title: "Delivery Workers", icon: Users },
-  { title: "Repair Workers", icon: Drill },
   { title: "Shop Sales", icon: ShoppingBag },
   { title: "Search Panel", icon: SquareMenu },
+  { title: "Stocks", icon: PackageOpen },
   { title: "History", icon: History },
-  { title: "Add Worker", icon: Pickaxe },
+  { title: "Repair Workers", icon: Drill },
+  { title: "CRM Customers", icon: Users },
+  { title: "Add Customer", icon: UserPlus },
   { title: "Settings", icon: Settings },
   { title: "Main Page", icon: StickyNote },
   { title: "Log Out", icon: LogOut },
@@ -56,7 +55,7 @@ export default function Index() {
   const salesTab = useUser((state) => state.salesTab);
 
   const [isRolled, setIsRolled] = useState(false);
-  const [activeTab, setActiveTab] = useState("Dashboard");
+  const [activeTab, setActiveTab] = useState("Shop");
   const [searchChosen, setSearchChosen] = useState(1);
   const [remove, setRemove] = useState(false);
 
@@ -317,8 +316,7 @@ export default function Index() {
               />
             </motion.div>
           )}
-          {(activeTab == "Search" || activeTab == "Details") &&
-          vin.length > 0 ? (
+          {vin.length > 0 ? (
             <div className="justify-self-end ml-auto flex flex-row gap-2">
               <AnimatePresence>
                 {remove && (
@@ -357,33 +355,44 @@ export default function Index() {
             ""
           )}
         </header>
-        {activeTab == "Dashboard" && <Dashboard />}
-        {activeTab == "Orders" && <Orders />}
-        {activeTab == "Delivery" && <Workers />}
-        {activeTab == "Settings" && <Setting />}
-        {activeTab == "Add" && <AddDeliveryWorker />}
-        {activeTab == "Search" && searchChosen == 1 ? (
-          <SearchTab
-            results={results}
-            setResults={setResults}
-            setRecentSearches={setRecentSearches}
-          />
-        ) : activeTab == "Search" && searchChosen == 2 ? (
-          <Category />
-        ) : (
-          ""
-        )}
-        {activeTab == "History" && (
-          <SearchHistory
-            vinHistory={vinHistory}
-            setResults={setResults}
-            results={results}
-            setActiveTab={setActiveTab}
-          />
-        )}
-        {activeTab == "Repair" && <RepairWorkers />}
-        {activeTab == "Shop" && <ShopSales setActiveTab={setActiveTab} />}
-        {activeTab == "Details" && <OrderDetails setActiveTab={setActiveTab} />}
+        <AnimatePresence>
+          {activeTab == "Settings" && <Setting />}
+          {activeTab == "Search" && searchChosen == 1 ? (
+            <SearchTab
+              results={results}
+              setResults={setResults}
+              setRecentSearches={setRecentSearches}
+            />
+          ) : activeTab == "Search" && searchChosen == 2 ? (
+            <Category />
+          ) : (
+            ""
+          )}
+          {activeTab == "History" && (
+            <SearchHistory
+              vinHistory={vinHistory}
+              setResults={setResults}
+              results={results}
+              setActiveTab={setActiveTab}
+            />
+          )}
+          {activeTab == "CRM" && (
+            <CRMProvider>
+              <Customers setActiveTab={setActiveTab} />
+            </CRMProvider>
+          )}
+          {activeTab == "Add" && (
+            <CRMProvider>
+              <AddCustomer setActiveTab={setActiveTab} />
+            </CRMProvider>
+          )}
+          {activeTab == "Stocks" && <Stocks />}
+          {activeTab == "Repair" && <RepairWorkers />}
+          {activeTab == "Shop" && <ShopSales setActiveTab={setActiveTab} />}
+          {activeTab == "Details" && (
+            <OrderDetails setActiveTab={setActiveTab} />
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );

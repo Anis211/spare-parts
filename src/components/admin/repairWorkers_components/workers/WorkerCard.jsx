@@ -1,6 +1,13 @@
 "use client";
 import { useState } from "react";
-import { Phone, Wrench, DollarSign, Minus, History } from "lucide-react";
+import {
+  Phone,
+  Wrench,
+  DollarSign,
+  Minus,
+  History,
+  UserMinus,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -12,12 +19,14 @@ import { PaymentModal } from "./PaymentModal";
 import { PaymentHistoryModal } from "./PaymentHistoryModal";
 import { WorkerStatsModal } from "./WorkerStatsModal";
 import { WorkHistoryModal } from "./WorkHistoryModal";
+import { RemoveWorkerModal } from "./RemoveWorkerModal";
 
-export function WorkerCard({ worker, onAddPayment }) {
+export function WorkerCard({ worker, onAddPayment, onRemoveWorker }) {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showWorkHistoryModal, setShowWorkHistoryModal] = useState(false);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
 
   const balance = worker.totalEarned - worker.totalPaid;
   const currentMonthTotal = worker.currentMonthWorks.reduce(
@@ -59,17 +68,30 @@ export function WorkerCard({ worker, onAddPayment }) {
                 </p>
               </div>
             </div>
-            <Badge
-              variant="secondary"
-              className="border-0"
-              style={{
-                backgroundColor: "hsl(38 92% 50% / 0.1)",
-                color: "hsl(38 92% 50%)",
-              }}
-            >
-              <Wrench className="w-3 h-3 mr-1" />
-              {worker.specialty}
-            </Badge>
+            <div className="flex flex-col gap-1">
+              <Badge
+                variant="secondary"
+                className="border-0"
+                style={{
+                  backgroundColor: "hsl(38 92% 50% / 0.1)",
+                  color: "hsl(38 92% 50%)",
+                }}
+              >
+                <Wrench className="w-3 h-3 mr-1" />
+                {worker.specialty}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 self-end text-[hsl(215_20%_65%)] hover:text-[hsl(0_84%_60%)] hover:bg-[hsl(0_84%_60%)]/10 transition-colors duration-200"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowRemoveModal(true);
+                }}
+              >
+                <UserMinus className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
 
@@ -238,6 +260,15 @@ export function WorkerCard({ worker, onAddPayment }) {
           open={true}
           onClose={() => setShowWorkHistoryModal(false)}
           worker={worker}
+        />
+      )}
+
+      {showRemoveModal && (
+        <RemoveWorkerModal
+          open={true}
+          onClose={() => setShowRemoveModal(false)}
+          worker={worker}
+          onRemove={onRemoveWorker}
         />
       )}
     </>
