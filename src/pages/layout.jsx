@@ -10,6 +10,9 @@ export default function Layout({ children }) {
   const router = useRouter();
   const user = useUser((state) => state.user);
 
+  const chatId = useUser((state) => state.chatId);
+  const setChatId = useUser((state) => state.setChatId);
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -41,12 +44,12 @@ export default function Layout({ children }) {
   const toggleChat = async () => {
     setIsChatOpen(!isChatOpen);
 
-    if (messages.length <= 1) {
+    if (messages.length <= 1 && chatId.length > 0) {
       try {
         const response = await fetch("/api/chat/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user: user.id }),
+          body: JSON.stringify({ chatId: chatId }),
         });
         const data = await response.json();
 
@@ -66,6 +69,9 @@ export default function Layout({ children }) {
       } catch (error) {
         console.error("Error fetching messages:", error);
       }
+    } else {
+      const newChatId = Math.floor(100000 + Math.random() * 900000).toString();
+      setChatId(newChatId);
     }
   };
 
@@ -85,7 +91,8 @@ export default function Layout({ children }) {
         body: JSON.stringify({
           userMessages: toSend,
           userImages: lastImagesBase64 || [],
-          user: user.id,
+          source: "chat",
+          chatId: chatId,
         }),
       });
 
@@ -201,7 +208,8 @@ export default function Layout({ children }) {
       {children}
 
       {!router.asPath.includes("/admin") &&
-        !router.asPath.includes("/repair") && (
+        !router.asPath.includes("/repair") &&
+        !router.asPath.includes("/sign-in") && (
           <div className="fixed bottom-6 right-6">
             <AnimatePresence>
               {isChatOpen ? (

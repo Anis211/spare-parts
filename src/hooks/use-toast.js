@@ -2,16 +2,9 @@ import * as React from "react";
 
 // Config
 const TOAST_LIMIT = 1;
-const TOAST_REMOVE_DELAY = 1000000; // 1000 seconds — intentionally long
+const TOAST_REMOVE_DELAY = 1000000; // ~16.7 minutes (as in original)
 
-// Action types (as plain strings)
-const actionTypes = {
-  ADD_TOAST: "ADD_TOAST",
-  UPDATE_TOAST: "UPDATE_TOAST",
-  DISMISS_TOAST: "DISMISS_TOAST",
-  REMOVE_TOAST: "REMOVE_TOAST",
-};
-
+// Internal state & utils
 let count = 0;
 
 function genId() {
@@ -19,21 +12,15 @@ function genId() {
   return count.toString();
 }
 
-// State
-let memoryState = { toasts: [] };
-
-// Timeout tracking
 const toastTimeouts = new Map();
 
 const addToRemoveQueue = (toastId) => {
-  if (toastTimeouts.has(toastId)) {
-    return;
-  }
+  if (toastTimeouts.has(toastId)) return;
 
   const timeout = setTimeout(() => {
     toastTimeouts.delete(toastId);
     dispatch({
-      type: actionTypes.REMOVE_TOAST,
+      type: "REMOVE_TOAST",
       toastId: toastId,
     });
   }, TOAST_REMOVE_DELAY);
@@ -41,16 +28,27 @@ const addToRemoveQueue = (toastId) => {
   toastTimeouts.set(toastId, timeout);
 };
 
-// Reducer
+// Actions
+const actionTypes = {
+  ADD_TOAST: "ADD_TOAST",
+  UPDATE_TOAST: "UPDATE_TOAST",
+  DISMISS_TOAST: "DISMISS_TOAST",
+  REMOVE_TOAST: "REMOVE_TOAST",
+};
+
+// Initial state
+let memoryState = { toasts: [] };
+
+// Reducer (pure function)
 const reducer = (state, action) => {
   switch (action.type) {
-    case actionTypes.ADD_TOAST:
+    case "ADD_TOAST":
       return {
         ...state,
         toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
       };
 
-    case actionTypes.UPDATE_TOAST:
+    case "UPDATE_TOAST":
       return {
         ...state,
         toasts: state.toasts.map((t) =>
@@ -58,7 +56,7 @@ const reducer = (state, action) => {
         ),
       };
 
-    case actionTypes.DISMISS_TOAST: {
+    case "DISMISS_TOAST": {
       const { toastId } = action;
 
       // Side effect: schedule removal
@@ -78,7 +76,7 @@ const reducer = (state, action) => {
       };
     }
 
-    case actionTypes.REMOVE_TOAST:
+    case "REMOVE_TOAST":
       if (action.toastId === undefined) {
         return { ...state, toasts: [] };
       }
@@ -92,7 +90,7 @@ const reducer = (state, action) => {
   }
 };
 
-// Global listeners for state updates
+// Global dispatch
 const listeners = [];
 
 function dispatch(action) {
@@ -100,21 +98,20 @@ function dispatch(action) {
   listeners.forEach((listener) => listener(memoryState));
 }
 
-// Public API: `toast({ title, description, ... })`
+// Public API
 function toast(props) {
   const id = genId();
 
-  const update = (newProps) =>
+  const update = (updatedProps) =>
     dispatch({
-      type: actionTypes.UPDATE_TOAST,
-      toast: { ...newProps, id },
+      type: "UPDATE_TOAST",
+      toast: { ...updatedProps, id },
     });
 
-  const dismiss = () =>
-    dispatch({ type: actionTypes.DISMISS_TOAST, toastId: id });
+  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id });
 
   dispatch({
-    type: actionTypes.ADD_TOAST,
+    type: "ADD_TOAST",
     toast: {
       ...props,
       id,
@@ -125,12 +122,16 @@ function toast(props) {
     },
   });
 
-  return { id, dismiss, update };
+  return {
+    id,
+    dismiss,
+    update,
+  };
 }
 
-// React Hook
+// Hook
 function useToast() {
-  const [state, setState] = React.useState(memoryState);
+  const [state, setState] = React.useState(() => memoryState);
 
   React.useEffect(() => {
     listeners.push(setState);
@@ -142,11 +143,14 @@ function useToast() {
     };
   }, []);
 
+  const dismiss = (toastId) => {
+    dispatch({ type: "DISMISS_TOAST", toastId });
+  };
+
   return {
     ...state,
     toast,
-    dismiss: (toastId) =>
-      dispatch({ type: actionTypes.DISMISS_TOAST, toastId }),
+    dismiss,
   };
 }
 

@@ -5,7 +5,7 @@ import {
   useScroll,
   useMotionValueEvent,
 } from "framer-motion"; // Fixed import
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/router";
 import useUser from "@/zustand/user";
 
@@ -64,12 +64,6 @@ export default function Navbar() {
     setTextColor("black");
     setBorder("1px solid #1f2937");
   };
-
-  useEffect(() => {
-    if (router.asPath == "/sign-in" || router.asPath == "/sign-up") {
-      makeBlack();
-    }
-  }, [makeBlack]);
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);

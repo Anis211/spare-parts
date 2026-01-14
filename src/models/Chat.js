@@ -3,8 +3,15 @@ import mongoose from "mongoose";
 const chatSchema = new mongoose.Schema(
   {
     user: {
-      type: String,
-      required: true,
+      source: {
+        type: String,
+        enum: ["website", "telegram", "whatsapp", "instagram"],
+        required: true,
+      },
+      id: {
+        type: String,
+        required: true,
+      },
     },
     chatData: [
       {

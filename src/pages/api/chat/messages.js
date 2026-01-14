@@ -7,14 +7,14 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-  const { user } = req.body;
+  const { chatId } = req.body;
 
-  if (!user) {
+  if (!chatId) {
     return res.status(400).json({ error: "User ID is required" });
   }
 
   try {
-    const chatData = await Chat.findOne({ user: user });
+    const chatData = await Chat.findOne({ "user.id": chatId });
 
     if (!chatData) {
       return res

@@ -2,7 +2,6 @@ import connectDB from "@/lib/mongoose";
 import { OpenAI } from "openai";
 import Chat from "@/models/Chat";
 import User from "@/models/User";
-import PendingOrder from "@/models/PendingOrder";
 import Alatrade from "@/models/Alatrade";
 import { getGrid } from "@/lib/gridfs";
 import { tonEncode } from "@/lib/ton";
@@ -13,9 +12,6 @@ import {
 import { createLimitedCaller } from "@/lib/limiterBackoff";
 import Semaphore from "@/lib/bulkhead";
 import CircuitBreaker from "@/lib/circuitBreaker";
-import { sendMessage } from "../bot-webhooks/telegram-webhook";
-import { findEnrichedParts } from "@/helpers/orderParts";
-import axios from "axios";
 
 connectDB();
 
@@ -132,7 +128,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { userMessages, userImages, source, ...rest } = req.body;
+    const { userMessages, userImages, user, source } = req.body;
     console.log("Started user-question.js");
 
     if (!userMessages) {
@@ -144,28 +140,13 @@ export default async function handler(req, res) {
 
     const userQuestion = userMessages.map((text) => ({
       role: "user",
-      content: [{ type: "text", text: text }],
+      content: text,
     }));
 
-    userImages.length > 0 &&
-      source != "chat" &&
-      userImages.map((imageUrl) =>
-        userQuestion[userQuestion.length - 1].content.push({
-          type: "image_url",
-          image_url: { url: imageUrl },
-        })
-      );
-
-    console.log("userQuestion: ", userQuestion);
-    console.log("userImages: ", userImages);
-
-    let pastMessages = await Chat.find({ "user.id": rest.chatId })
-      .sort({ createdAt: -1 })
-      .limit(3);
-
-    if (!pastMessages) {
-      pastMessages = [];
-    }
+    const pastMessages =
+      user != undefined
+        ? await Chat.find({ user: user }).sort({ createdAt: -1 }).limit(3)
+        : [];
 
     let messages = [
       {
@@ -178,8 +159,7 @@ You are a helpful auto-parts assistant with 3 functions:
 3. find_and_send_pictures – show part images.
 
 scrape_website rules:
-if there is images: ['url', 'url'] in the user message then it is the image user have provided to you.
-if the userImages is not an empty list then it is most likely an image of the part.
+if there is images: ['url', 'url'] in the user message than it is the image user have provided to you
 Use only if the user asks about part stock, price, analogs, or sends a photo of the part he needs.
 Ask VIN if missing; never repeat requests for part name.
 Do NOT use for general car or maintenance questions.
@@ -390,17 +370,6 @@ Need help choosing? 🚗💨
       let partNumber;
 
       if (functionName === "scrape_website") {
-        console.log("Started Scrape Website");
-        if (source !== "chat") {
-          // Handle non-chat sources (e.g., Telegram)
-          if (source === "telegram" && rest.chatId) {
-            await sendMessage(
-              rest.chatId,
-              `🔍 Searching for part "${functionArgs.partName1}" using VIN ${functionArgs.vin}...`
-            );
-          }
-        }
-
         const { partName1, vin } = functionArgs;
         let partName = partName1;
 
@@ -1059,141 +1028,179 @@ Available parts data: ${resText}`,
         }
       } else if (functionName === "order_parts") {
         const { partNumbers } = functionArgs;
-        console.log("Started Order Parts Function");
 
         if (!Array.isArray(partNumbers) || partNumbers.length === 0) {
           throw new Error("No parts provided for ordering");
         }
 
         // Fetch user and chat
-        const userData = await User.findOne({ "chatId.id": rest.chatId });
+        const userData = await User.findOne({ email: user });
         if (!userData) {
-          await PendingOrder.findOneAndUpdate(
-            { chatId: rest.chatId },
-            {
-              chatId: rest.chatId,
-              partNumbers: partNumbers,
-              createdAt: new Date(),
-            },
-            { upsert: true, new: true }
-          );
-
-          await axios.post(
-            `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-            {
-              chat_id: rest.chatId,
-              text: "📱 To place your order, please share your contact:",
-              reply_markup: {
-                keyboard: [
-                  [{ text: "📱 Share My Contact", request_contact: true }],
-                ],
-                resize_keyboard: true,
-                one_time_keyboard: true,
-              },
-            }
-          );
-
-          const functionResponse = {
-            status: "pending",
-            message: "User not registered. Awaiting contact information.",
-          };
-
-          messages.push(responseMessage);
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            name: functionName,
-            content: JSON.stringify(functionResponse),
-          });
-
-          finalResponse = await llmChat(messages, { model: "gpt-4o" });
-          return res
-            .status(200)
-            .json("Phone Number Reciever Has Been Sent Successfully!");
+          throw new Error("User not found");
         }
 
-        const chatDoc = await Chat.findOne({ "user.id": rest.chatId });
+        const chatDoc = await Chat.findOne({ user });
         if (!chatDoc || !chatDoc.chatData || chatDoc.chatData.length === 0) {
           throw new Error(
             "No previous part data found. Please search for parts first."
           );
         }
 
-        const enrichedParts = findEnrichedParts(partNumbers, chatDoc);
+        // ---------- helpers ----------
+        const normalize = (s) =>
+          (s ?? "")
+            .toString()
+            .toLowerCase()
+            .replace(/[\\\/|_+.,!<>()[\]{}:;"'`~^%$#@*&?-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
 
-        try {
-          function isSameDay(date1, date2) {
-            if (!date1 || !date2) return false;
-            const d1 = new Date(date1);
-            const d2 = new Date(date2);
-            return (
-              d1.getFullYear() === d2.getFullYear() &&
-              d1.getMonth() === d2.getMonth() &&
-              d1.getDate() === d2.getDate()
-            );
+        const levenshtein = (a, b) => {
+          const m = a.length,
+            n = b.length;
+          if (!m) return n;
+          if (!n) return m;
+          const dp = Array.from({ length: m + 1 }, (_, i) =>
+            Array(n + 1).fill(0)
+          );
+          for (let i = 0; i <= m; i++) dp[i][0] = i;
+          for (let j = 0; j <= n; j++) dp[0][j] = j;
+          for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+              const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+              dp[i][j] = Math.min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost
+              );
+            }
+          }
+          return dp[m][n];
+        };
+
+        const levRatio = (a, b) => {
+          const A = normalize(a),
+            B = normalize(b);
+          if (!A || !B) return 0;
+          if (A === B) return 1;
+          const dist = levenshtein(A, B);
+          return 1 - dist / Math.max(A.length, B.length);
+        };
+
+        const tokenSetRatio = (a, b) => {
+          const A = new Set(normalize(a).split(" ").filter(Boolean));
+          const B = new Set(normalize(b).split(" ").filter(Boolean));
+          if (!A.size || !B.size) return 0;
+          let inter = 0;
+          for (const t of A) if (B.has(t)) inter++;
+          return (2 * inter) / (A.size + B.size);
+        };
+
+        const nameSimilarity = (a, b) =>
+          Math.max(levRatio(a, b), tokenSetRatio(a, b));
+
+        const brandEqual = (a, b) => normalize(a) === normalize(b);
+
+        // ---------- pick ONE best analog ----------
+        const getBestAnalog = (
+          analogs,
+          partData,
+          { strict = 0.95, fallback = 0.9 } = {}
+        ) => {
+          let best = { product: null, score: 0 };
+
+          for (const product of analogs) {
+            if (!brandEqual(product?.brand, partData?.brand)) continue;
+
+            const score = nameSimilarity(product?.name, partData?.partName);
+
+            if (score > best.score) {
+              best = { product, score };
+            }
           }
 
-          const foundIndex = userData.parts.findIndex(
-            (item) =>
-              item.purchaseStatus === "pending" &&
-              isSameDay(item.purchaseDate, new Date())
+          if (best.product && best.score >= strict) return best.product;
+          if (best.product && best.score >= fallback) return best.product;
+          return null;
+        };
+
+        console.log(
+          "chatData: ",
+          chatDoc.chatData.flatMap((item) => item.analogs)
+        );
+
+        const enrichedParts = partNumbers.map((requestedPart) => {
+          const bestMatch = getBestAnalog(
+            chatDoc.chatData.flatMap((item) => item.analogs),
+            {
+              brand: requestedPart.brand,
+              partName: requestedPart.partName,
+            },
+            {
+              strict: 0.95,
+              fallback: 0.9,
+            }
           );
 
-          if (foundIndex !== -1) {
-            console.log("Found the Pending Part");
-
-            // Create new items to add
-            const newItems = enrichedParts.map((part) => ({
-              id: Math.floor(100000 + Math.random() * 900000).toString(),
-              name: part.partName,
-              brand: part.brand,
-              article: part.article,
-              quantity: part.orderQuantity,
-              price: part.partPrice,
-            }));
-
-            // Update the specific part's items
-            const updatedParts = [...userData.parts];
-            updatedParts[foundIndex] = {
-              ...updatedParts[foundIndex],
-              items: [...updatedParts[foundIndex].items, ...newItems],
+          if (!bestMatch) {
+            console.warn("Ordered part not found in chatData:", requestedPart);
+            return {
+              ...requestedPart,
+              article: null,
+              guid: null,
+              stocks: [],
             };
-
-            // Save back to DB
-            await User.findOneAndUpdate(
-              { "chatId.id": rest.chatId }, // ✅ Correct path
-              { $set: { parts: updatedParts } }
-            );
-          } else {
-            await User.findOneAndUpdate(
-              {
-                "chatId.id": rest.chatId,
-              },
-              {
-                $push: {
-                  parts: {
-                    items: enrichedParts.map((part) => ({
-                      id: Math.floor(
-                        100000 + Math.random() * 900000
-                      ).toString(),
-                      name: part.partName,
-                      brand: part.brand,
-                      article: part.article,
-                      quantity: part.orderQuantity,
-                      price: part.partPrice,
-                    })),
-                    purchaseDate: new Date(),
-                    purchaseStatus: "pending",
-                    repairWorkId: null,
-                  },
-                },
-              }
-            );
           }
+
+          let selectedStock = null;
+          if (bestMatch.stocks && bestMatch.stocks.length > 0) {
+            const flatStocks = bestMatch.stocks.flat();
+            selectedStock =
+              flatStocks.find(
+                (stock) => stock.partPrice === requestedPart.partPrice
+              ) ||
+              flatStocks[0] ||
+              null;
+          }
+
+          return {
+            brand: bestMatch.brand,
+            partName: bestMatch.name,
+            orderQuantity: requestedPart.orderQuantity,
+            partPrice: requestedPart.partPrice,
+            article: bestMatch.article,
+            guid: bestMatch.guid,
+            pictures: bestMatch.pictures,
+            stockInfo: selectedStock,
+            sources: bestMatch.sources,
+          };
+        });
+
+        try {
+          const baseUrl =
+            process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
+
+          const orderResponse = await fetch(`${baseUrl}/api/order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              parts: enrichedParts,
+              user: userData,
+            }),
+          });
+
+          const orderResult = await orderResponse.json();
+
+          if (!orderResponse.ok) {
+            throw new Error(orderResult.message || "Order API failed");
+          }
+
+          console.log("Order result id:", orderResult);
 
           const functionResponse = {
             status: "success",
             message: `Successfully ordered ${enrichedParts.length} part(s)!`,
+            orderId: orderResult.order.orderId.split("-")[1],
           };
 
           messages.push(responseMessage);
@@ -1230,7 +1237,13 @@ Available parts data: ${resText}`,
           throw new Error("No parts data provided to find a proper photo!");
         }
 
-        const chatDoc = await Chat.findOne({ "user.id": rest.chatId });
+        // Fetch user and chat
+        const userData = await User.findOne({ email: user });
+        if (!userData) {
+          throw new Error("User not found");
+        }
+
+        const chatDoc = await Chat.findOne({ user });
         if (!chatDoc || !chatDoc.chatData || chatDoc.chatData.length === 0) {
           throw new Error(
             "No previous part data found. Please search for parts first."
@@ -1404,56 +1417,55 @@ Available parts data: ${resText}`,
       chatUpdate.embedding = queryEmbedding;
     }
 
-    const assistantMessage = {
-      text: aiResponse,
-      metadata: {
-        role: "assistant",
-        createdAt: new Date(),
-      },
-    };
-    const existingChat = await Chat.findOne({ "user.id": rest.chatId });
-
-    if (existingChat) {
-      await Chat.updateOne(
-        { "user.id": rest.chatId },
-        {
-          $push: {
-            chat: { $each: [chatUpdate, assistantMessage] },
-          },
-        }
-      );
-
-      if (chatData != null) {
-        const alreadyExists =
-          Array.isArray(existingChat.chatData) &&
-          existingChat.chatData.some(
-            (item) =>
-              item?.original?.article === chatData.original?.article &&
-              item?.original?.name === chatData.original?.name
-          );
-
-        if (!alreadyExists) {
-          await Chat.updateOne(
-            { "user.id": rest.chatId },
-            {
-              $push: {
-                chatData: chatData,
-              },
-            }
-          );
-        }
-      }
-    } else {
-      const newChat = new Chat({
-        user: {
-          source: source == "chat" ? "website" : source,
-          id: rest.chatId,
+    if (source === "chat") {
+      const assistantMessage = {
+        text: aiResponse,
+        metadata: {
+          role: "assistant",
+          createdAt: new Date(),
         },
-        chatData: chatData != null ? [chatData] : [],
-        chat: [chatUpdate, assistantMessage],
-      });
+      };
+      const existingChat = await Chat.findOne({ user });
 
-      await newChat.save();
+      if (existingChat) {
+        await Chat.updateOne(
+          { user },
+          {
+            $push: {
+              chat: { $each: [chatUpdate, assistantMessage] },
+            },
+          }
+        );
+
+        if (chatData != null) {
+          const alreadyExists =
+            Array.isArray(existingChat.chatData) &&
+            existingChat.chatData.some(
+              (item) =>
+                item?.original?.article === chatData.original?.article &&
+                item?.original?.name === chatData.original?.name
+            );
+
+          if (!alreadyExists) {
+            await Chat.updateOne(
+              { user },
+              {
+                $push: {
+                  chatData: chatData,
+                },
+              }
+            );
+          }
+        }
+      } else {
+        const newChat = new Chat({
+          user,
+          chatData: chatData != null ? [chatData] : [],
+          chat: [chatUpdate, assistantMessage],
+        });
+
+        await newChat.save();
+      }
     }
 
     res

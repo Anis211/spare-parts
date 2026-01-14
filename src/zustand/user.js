@@ -57,8 +57,11 @@ const useUser = create(
 
       languange: true,
       changeLanguage: () => set((state) => ({ language: !state.language })),
-      chat: [{ isUser: false, text: "How can i assist you today?" }],
 
+      chatId: "",
+      setChatId: (newChatId) => set(() => ({ chatId: newChatId })),
+
+      chat: [{ isUser: false, text: "How can i assist you today?" }],
       changeChat: (message) =>
         set((state) => ({ chat: [...state.chat, message] })),
       clearChat: () =>
