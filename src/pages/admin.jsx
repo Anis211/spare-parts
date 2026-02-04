@@ -7,6 +7,7 @@ import RepairWorkers from "@/components/admin/RepairWorkers";
 import Customers from "@/components/admin/Customers";
 import AddCustomer from "@/components/admin/AddCustomer";
 import Stocks from "@/components/admin/Stocks";
+import OrderDetails from "@/components/admin/Details";
 import { CRMProvider } from "@/hooks/CRMContext";
 import {
   Package,
@@ -30,7 +31,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import useUser from "@/zustand/user";
-import OrderDetails from "@/components/admin/Details";
 
 const titles = [
   { title: "Shop Sales", icon: ShoppingBag },
@@ -62,6 +62,7 @@ export default function Index() {
   const [results, setResults] = useState([]);
   const [recentSearches, setRecentSearches] = useState([]);
   const [vinHistory, setVinHistory] = useState(null);
+  const [selectedSalesTab, setSelectedSalesTab] = useState(null);
 
   const func = async () => {
     const res = await fetch(
@@ -388,9 +389,17 @@ export default function Index() {
           )}
           {activeTab == "Stocks" && <Stocks />}
           {activeTab == "Repair" && <RepairWorkers />}
-          {activeTab == "Shop" && <ShopSales setActiveTab={setActiveTab} />}
+          {activeTab == "Shop" && (
+            <ShopSales
+              setActiveTab={setActiveTab}
+              setSelectedSalesTab={setSelectedSalesTab}
+            />
+          )}
           {activeTab == "Details" && (
-            <OrderDetails setActiveTab={setActiveTab} />
+            <OrderDetails
+              setActiveTab={setActiveTab}
+              selectedSalesTab={selectedSalesTab}
+            />
           )}
         </AnimatePresence>
       </motion.div>

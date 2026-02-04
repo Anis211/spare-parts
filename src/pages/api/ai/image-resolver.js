@@ -6,8 +6,6 @@ import {
 import { createLimitedCaller } from "@/lib/limiterBackoff";
 import connectDB from "@/lib/mongoose";
 
-connectDB();
-
 // === OpenAI Client Initialization ===
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -62,6 +60,8 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method != "POST") {
     res.status(500).json("Wrong request method!");
   }

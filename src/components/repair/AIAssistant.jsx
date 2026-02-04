@@ -1,11 +1,14 @@
-import { useState, useRef, useEffect } from "react";
-import { Mic, MicOff, Bot, User, Send, Keyboard } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Mic, MicOff, Bot, User, Send, Keyboard, Loader2 } from "lucide-react";
 import { Button } from "@/components/repair/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/repair/ui/input";
 import { ClientInfoPanel } from "@/components/repair/chat/ClientInfoPanel";
 import { PinnedRepairBanner } from "@/components/repair/chat/PinnedRepairBanner";
 import { PartsConfirmationPanel } from "@/components/repair/chat/PartsConfirmationPanel";
+import { Progress } from "@/components/repair/ui/progress";
+import { VoiceConfirmationPanel } from "@/components/repair/chat/VoiceConfirmationPanel";
+import { toast } from "sonner";
 
 // Mock client data for next appointment
 const nextClientData = {
@@ -57,37 +60,21 @@ const nextClientData = {
   ],
 };
 
-const initialMessages = [
-  {
-    id: 1,
-    role: "assistant",
-    content:
-      "Hi! I'm your AI assistant. I can help you with your schedule, parts ordering, and repair status updates. How can I help you today?",
-    time: "10:30 AM",
-  },
-  {
-    id: 2,
-    role: "user",
-    content: "What's my next appointment?",
-    time: "10:32 AM",
-  },
-  {
-    id: 3,
-    role: "assistant",
-    content: "Here's your next appointment:",
-    time: "10:32 AM",
-    clientData: nextClientData,
-  },
-];
-
-export default function AIAssistant() {
+export default function AIAssistant({ messages, setMessages }) {
   const [isListening, setIsListening] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+  const [voiceConfirmation, setVoiceConfirmation] = useState(null);
+
   const [inputText, setInputText] = useState("");
-  const [messages, setMessages] = useState(initialMessages);
   const [isTyping, setIsTyping] = useState(false);
   const [activeRepair, setActiveRepair] = useState(null);
   const messagesEndRef = useRef(null);
+
+  // Voice recording refs
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const streamRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,8 +84,166 @@ export default function AIAssistant() {
     scrollToBottom();
   }, [messages]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsVoiceProcessing(true);
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        // Cleanup stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "recording.webm");
+        formData.append("model", "whisper-1");
+
+        // ✅ CORRECT: No headers - browser sets multipart automatically
+        const res = await fetch("/api/chat/transcribe", {
+          method: "POST",
+          // ❌ REMOVE THIS: headers: { "Content-Type": "application/json" },
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          setIsVoiceProcessing(false);
+          setVoiceConfirmation({
+            transcribedText: data.transcription || "No transcription available",
+            audioUrl: audioUrl,
+          });
+        } else {
+          toast.error("Failed to transcribe voice message");
+        }
+      };
+
+      mediaRecorder.start();
+      setIsListening(true);
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
+      toast.error("Please allow microphone access to record voice messages");
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state === "recording"
+    ) {
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+    }
+  }, []);
+
   const toggleListening = () => {
-    setIsListening(!isListening);
+    if (isListening) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  const handleVoiceConfirm = async () => {
+    if (!voiceConfirmation) return;
+
+    const transcribedMessage = {
+      id: messages.length + 1,
+      role: "user",
+      content: voiceConfirmation.transcribedText,
+      time: new Date().toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      isRepairSession: !!activeRepair,
+    };
+
+    setMessages((prev) => [...prev, transcribedMessage]);
+    setVoiceConfirmation(null);
+    setIsTyping(true);
+
+    const res = await fetch("/api/chat/worker_question", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userMessages: [voiceConfirmation.transcribedText],
+        source: "website",
+        id: 3,
+      }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      const newAssistantMessage = {
+        id: messages.length + 2,
+        role: "assistant",
+        content: data.answer,
+        time: new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        isRepairSession: !!activeRepair,
+      };
+
+      setMessages((prev) => [...prev, newAssistantMessage]);
+    } else {
+      const errorMessage = {
+        id: messages.length + 2,
+        role: "assistant",
+        content:
+          "❌ Sorry, there was an error processing your request. Please try again.",
+        time: new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        isRepairSession: !!activeRepair,
+      };
+
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const handleVoiceCancel = () => {
+    setVoiceConfirmation(null);
+  };
+
+  const handleVoiceRetry = () => {
+    setVoiceConfirmation(null);
+    startRecording();
   };
 
   const handleStartRepair = (client) => {
@@ -106,6 +251,7 @@ export default function AIAssistant() {
       hour: "numeric",
       minute: "2-digit",
     });
+
     const repairStartMessage = {
       id: messages.length + 1,
       role: "assistant",
@@ -113,6 +259,7 @@ export default function AIAssistant() {
       time: startTime,
       isRepairSession: true,
     };
+
     setMessages((prev) => [...prev, repairStartMessage]);
     setActiveRepair({
       client,
@@ -123,10 +270,12 @@ export default function AIAssistant() {
 
   const handleEndRepair = () => {
     if (!activeRepair) return;
+
     const endTime = new Date().toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
     });
+
     const repairEndMessage = {
       id: messages.length + 1,
       role: "assistant",
@@ -134,6 +283,7 @@ export default function AIAssistant() {
       time: endTime,
       isRepairSession: true,
     };
+
     setMessages((prev) => [...prev, repairEndMessage]);
     setActiveRepair(null);
   };
@@ -155,6 +305,7 @@ export default function AIAssistant() {
       "belt",
     ];
     const lowerText = text.toLowerCase();
+
     return (
       activeRepair !== null &&
       partsKeywords.some((keyword) => lowerText.includes(keyword))
@@ -174,6 +325,7 @@ export default function AIAssistant() {
         inStock: true,
       });
     }
+
     if (lowerText.includes("oil") || lowerText.includes("filter")) {
       mockParts.push({
         id: "2",
@@ -183,6 +335,7 @@ export default function AIAssistant() {
         inStock: true,
       });
     }
+
     if (lowerText.includes("spark") || lowerText.includes("plug")) {
       mockParts.push({
         id: "3",
@@ -193,6 +346,7 @@ export default function AIAssistant() {
         estimatedDelivery: "Tomorrow, 2:00 PM",
       });
     }
+
     if (lowerText.includes("battery")) {
       mockParts.push({
         id: "4",
@@ -202,6 +356,7 @@ export default function AIAssistant() {
         inStock: true,
       });
     }
+
     if (lowerText.includes("belt")) {
       mockParts.push({
         id: "5",
@@ -212,6 +367,7 @@ export default function AIAssistant() {
         estimatedDelivery: "Wed, Jan 8",
       });
     }
+
     if (mockParts.length === 0) {
       mockParts.push({
         id: "6",
@@ -221,6 +377,7 @@ export default function AIAssistant() {
         inStock: true,
       });
     }
+
     return mockParts;
   };
 
@@ -229,6 +386,7 @@ export default function AIAssistant() {
       hour: "numeric",
       minute: "2-digit",
     });
+
     const confirmMessage = {
       id: messages.length + 1,
       role: "assistant",
@@ -237,6 +395,7 @@ export default function AIAssistant() {
       time,
       isRepairSession: true,
     };
+
     setMessages((prev) => [...prev, confirmMessage]);
   };
 
@@ -245,6 +404,7 @@ export default function AIAssistant() {
       hour: "numeric",
       minute: "2-digit",
     });
+
     const cancelMessage = {
       id: messages.length + 1,
       role: "assistant",
@@ -253,10 +413,11 @@ export default function AIAssistant() {
       time,
       isRepairSession: true,
     };
+
     setMessages((prev) => [...prev, cancelMessage]);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputText.trim()) return;
 
     const newUserMessage = {
@@ -272,11 +433,22 @@ export default function AIAssistant() {
 
     setMessages((prev) => [...prev, newUserMessage]);
     const userText = inputText;
+
     setInputText("");
     setIsTyping(true);
 
-    const partsRequested = isPartsRequest(userText);
+    const res = await fetch("/api/chat/worker_question", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userMessages: [userText],
+        source: "website",
+        id: 3,
+      }),
+    });
+    const data = await res.json();
 
+    /* const partsRequested = isPartsRequest(userText);
     setTimeout(() => {
       if (partsRequested) {
         const parts = generatePartsFromRequest(userText);
@@ -305,9 +477,11 @@ export default function AIAssistant() {
           "Sure thing! I've processed your request.",
           "Understood. Let me check that for you.",
         ];
+
         const responses = activeRepair ? repairResponses : generalResponses;
         const randomResponse =
           responses[Math.floor(Math.random() * responses.length)];
+
         const newAssistantMessage = {
           id: messages.length + 2,
           role: "assistant",
@@ -318,14 +492,44 @@ export default function AIAssistant() {
           }),
           isRepairSession: !!activeRepair,
         };
+
         setMessages((prev) => [...prev, newAssistantMessage]);
       }
       setIsTyping(false);
-    }, 1500);
+    }, 1500); */
+
+    if (data.success) {
+      const newAssistantMessage = {
+        id: messages.length + 2,
+        role: "assistant",
+        content: data.answer,
+        time: new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        isRepairSession: !!activeRepair,
+      };
+
+      setMessages((prev) => [...prev, newAssistantMessage]);
+    } else {
+      const errorMessage = {
+        id: messages.length + 2,
+        role: "assistant",
+        content:
+          "❌ Sorry, there was an error processing your request. Please try again.",
+        time: new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        isRepairSession: !!activeRepair,
+      };
+
+      setMessages((prev) => [...prev, errorMessage]);
+    }
   };
 
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 70px)" }}>
+    <div className="flex h-[calc(100vh-65px)] flex-col">
       {/* Pinned Repair Banner */}
       {activeRepair && (
         <PinnedRepairBanner
@@ -336,10 +540,7 @@ export default function AIAssistant() {
       )}
 
       {/* Chat Messages */}
-      <div
-        className="overflow-y-auto px-2 py-4 repair-scrollbar"
-        style={{ backgroundColor: "hsl(220 20% 8%)" }}
-      >
+      <div className="flex-1 overflow-y-auto repair-scrollbar px-2 py-4">
         <div className="mx-auto max-w-2xl space-y-4">
           {messages.map((message) => (
             <div
@@ -347,26 +548,17 @@ export default function AIAssistant() {
               className={cn(
                 "flex gap-3",
                 message.role === "user" && "flex-row-reverse",
-                message.isRepairSession && "pl-3"
+                message.isRepairSession &&
+                  "pl-3 border-l-2 border-[hsl(43_96%_56%)]",
               )}
-              style={{
-                borderLeft: message.isRepairSession
-                  ? "2px solid hsl(43 96% 56% / 0.3)"
-                  : "none",
-              }}
             >
               <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                style={{
-                  backgroundColor:
-                    message.role === "assistant"
-                      ? "hsl(43 96% 56%)"
-                      : "hsl(220 15% 18%)",
-                  color:
-                    message.role === "assistant"
-                      ? "hsl(220 20% 8%)"
-                      : "hsl(45 10% 95%)",
-                }}
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                  message.role === "assistant"
+                    ? "bg-[hsl(43_96%_56%)] text-[hsl(220_20%_8%)]"
+                    : "bg-[hsl(220_15%_18%)] text-[hsl(45_10%_95%)]",
+                )}
               >
                 {message.role === "assistant" ? (
                   <Bot className="h-4 w-4" />
@@ -374,46 +566,34 @@ export default function AIAssistant() {
                   <User className="h-4 w-4" />
                 )}
               </div>
+
               <div className="flex flex-col gap-2 max-w-[85%]">
                 <div
                   className={cn(
                     "rounded-2xl px-4 py-3",
                     message.role === "assistant"
-                      ? "rounded-tl-sm"
-                      : "rounded-tr-sm"
+                      ? "bg-[hsl(220_15%_18%)] text-[hsl(45_10%_95%)] rounded-tl-sm"
+                      : "bg-[hsl(43_96%_56%)] text-[hsl(220_20%_8%)] rounded-tr-sm",
+                    message.isRepairSession &&
+                      message.role === "assistant" &&
+                      "bg-[hsla(43,96%,56%,0.1)] border border-[hsla(43,96%,56%,0.2)]",
                   )}
-                  style={{
-                    backgroundColor:
-                      message.role === "assistant"
-                        ? message.isRepairSession
-                          ? "hsl(43 96% 56% / 0.1)"
-                          : "hsl(220 15% 18%)"
-                        : "hsl(43 96% 56%)",
-                    color:
-                      message.role === "assistant"
-                        ? "hsl(45 10% 95%)"
-                        : "hsl(220 20% 8%)",
-                    border:
-                      message.isRepairSession && message.role === "assistant"
-                        ? "1px solid hsl(43 96% 56% / 0.2)"
-                        : "none",
-                  }}
                 >
                   <p className="whitespace-pre-line text-sm">
                     {message.content}
                   </p>
                   <span
-                    className="mt-1 block text-[10px]"
-                    style={{
-                      color:
-                        message.role === "assistant"
-                          ? "hsl(220 10% 55%)"
-                          : "hsla(43, 96%, 56%, 0.7)",
-                    }}
+                    className={cn(
+                      "mt-1 block text-[10px]",
+                      message.role === "assistant"
+                        ? "text-[hsl(220_10%_55%)]"
+                        : "text-[hsl(220_20%_8%)]/70",
+                    )}
                   >
                     {message.time}
                   </span>
                 </div>
+
                 {message.clientData && (
                   <ClientInfoPanel
                     client={message.clientData}
@@ -421,6 +601,7 @@ export default function AIAssistant() {
                     onStartRepair={() => handleStartRepair(message.clientData)}
                   />
                 )}
+
                 {message.partsData && (
                   <PartsConfirmationPanel
                     parts={message.partsData}
@@ -436,40 +617,23 @@ export default function AIAssistant() {
           {/* Typing indicator */}
           {isTyping && (
             <div className="flex gap-3">
-              <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                style={{
-                  backgroundColor: "hsl(43 96% 56%)",
-                  color: "hsl(220 20% 8%)",
-                }}
-              >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(43_96%_56%)] text-[hsl(220_20%_8%)]">
                 <Bot className="h-4 w-4" />
               </div>
-              <div
-                className="rounded-2xl rounded-tl-sm px-4 py-3"
-                style={{ backgroundColor: "hsl(220 15% 18%)" }}
-              >
+
+              <div className="rounded-2xl rounded-tl-sm bg-[hsl(220_15%_18%)] px-4 py-3">
                 <div className="flex gap-1">
                   <span
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{
-                      backgroundColor: "hsl(220 10% 55%)",
-                      animationDelay: "0ms",
-                    }}
+                    className="h-2 w-2 animate-bounce rounded-full bg-[hsl(220_10%_55%)]"
+                    style={{ animationDelay: "0ms" }}
                   />
                   <span
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{
-                      backgroundColor: "hsl(220 10% 55%)",
-                      animationDelay: "150ms",
-                    }}
+                    className="h-2 w-2 animate-bounce rounded-full bg-[hsl(220_10%_55%)]"
+                    style={{ animationDelay: "150ms" }}
                   />
                   <span
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{
-                      backgroundColor: "hsl(220 10% 55%)",
-                      animationDelay: "300ms",
-                    }}
+                    className="h-2 w-2 animate-bounce rounded-full bg-[hsl(220_10%_55%)]"
+                    style={{ animationDelay: "300ms" }}
                   />
                 </div>
               </div>
@@ -481,38 +645,16 @@ export default function AIAssistant() {
       </div>
 
       {/* Input Area */}
-      <div
-        className="p-4"
-        style={{
-          borderTop: "1px solid hsl(220 15% 20%)",
-          backgroundColor: "hsla(220, 20%, 8%, 0.8)",
-          backdropFilter: "blur(8px)",
-        }}
-      >
+      <div className="border-t border-[hsl(220_15%_20%)] bg-[hsl(220_20%_8%)]/80 backdrop-blur-sm p-4">
         <div className="mx-auto max-w-2xl">
           {/* Mode Toggle */}
           <div className="mb-3 flex justify-center">
-            <div
-              className="inline-flex items-center gap-1 rounded-full p-1"
-              style={{ backgroundColor: "hsl(220 15% 18%)" }}
-            >
+            <div className="inline-flex items-center gap-1 rounded-full bg-[hsl(220_15%_18%)] p-1">
               <Button
                 variant={!isVoiceMode ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setIsVoiceMode(false)}
                 className="gap-2 rounded-full px-4"
-                style={
-                  !isVoiceMode
-                    ? {
-                        backgroundColor: "hsl(43 96% 56%)",
-                        color: "hsl(220 20% 8%)",
-                        boxShadow: "0 0 20px hsl(43 96% 56% / 0.3)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "hsl(45 10% 95%)",
-                      }
-                }
               >
                 <Keyboard className="h-4 w-4" />
                 Type
@@ -522,18 +664,6 @@ export default function AIAssistant() {
                 size="sm"
                 onClick={() => setIsVoiceMode(true)}
                 className="gap-2 rounded-full px-4"
-                style={
-                  isVoiceMode
-                    ? {
-                        backgroundColor: "hsl(43 96% 56%)",
-                        color: "hsl(220 20% 8%)",
-                        boxShadow: "0 0 20px hsl(43 96% 56% / 0.3)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "hsl(45 10% 95%)",
-                      }
-                }
               >
                 <Mic className="h-4 w-4" />
                 Voice
@@ -544,29 +674,57 @@ export default function AIAssistant() {
           {/* Input */}
           {isVoiceMode ? (
             <div className="flex flex-col items-center py-2">
-              <Button
-                size="lg"
-                onClick={toggleListening}
-                className={cn(
-                  "h-14 w-14 rounded-full transition-all",
-                  isListening && "animate-pulse"
-                )}
-                style={{
-                  backgroundColor: isListening
-                    ? "hsl(0 72% 51%)"
-                    : "hsl(43 96% 56%)",
-                  color: "hsl(0 0% 100%)",
-                }}
-              >
-                {isListening ? (
-                  <MicOff className="h-6 w-6" />
-                ) : (
-                  <Mic className="h-6 w-6" />
-                )}
-              </Button>
-              <p className="mt-2 text-xs" style={{ color: "hsl(220 10% 55%)" }}>
-                {isListening ? "Listening... Tap to stop" : "Tap to speak"}
-              </p>
+              {voiceConfirmation && (
+                <VoiceConfirmationPanel
+                  transcribedText={voiceConfirmation.transcribedText}
+                  audioUrl={voiceConfirmation.audioUrl}
+                  onConfirm={handleVoiceConfirm}
+                  onCancel={handleVoiceCancel}
+                  onRetry={handleVoiceRetry}
+                />
+              )}
+
+              {isVoiceProcessing && !voiceConfirmation && (
+                <div className="mb-4 w-full max-w-xs">
+                  <div className="flex items-center justify-center gap-2 rounded-full bg-[hsla(43,96%,56%,0.1)] px-4 py-2 text-sm text-[hsl(43_96%_56%)]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Processing voice...</span>
+                  </div>
+                  <Progress value={66} className="mt-2 h-1" />
+                </div>
+              )}
+
+              {!voiceConfirmation && (
+                <>
+                  <Button
+                    variant={isListening ? "destructive" : "default"}
+                    size="lg"
+                    onClick={toggleListening}
+                    disabled={isVoiceProcessing}
+                    className={cn(
+                      "h-14 w-14 rounded-full transition-all",
+                      isListening && "animate-pulse",
+                      isVoiceProcessing && "opacity-50 cursor-not-allowed",
+                    )}
+                  >
+                    {isVoiceProcessing ? (
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    ) : isListening ? (
+                      <MicOff className="h-6 w-6" />
+                    ) : (
+                      <Mic className="h-6 w-6" />
+                    )}
+                  </Button>
+
+                  <p className="mt-2 text-xs text-[hsl(220_10%_55%)]">
+                    {isVoiceProcessing
+                      ? "Converting speech to text..."
+                      : isListening
+                        ? "Listening... Tap to stop"
+                        : "Tap to speak"}
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex gap-2">
@@ -577,26 +735,14 @@ export default function AIAssistant() {
                 onKeyDown={(e) =>
                   e.key === "Enter" && !e.shiftKey && handleSendMessage()
                 }
-                className="flex-1 rounded-full px-4"
-                style={{
-                  backgroundColor: "hsl(220 15% 18%)",
-                  border: "none",
-                  color: "hsl(45 10% 95%)",
-                }}
+                className="flex-1 rounded-full bg-[hsl(220_15%_18%)] text-white border-0 px-4"
               />
+
               <Button
                 onClick={handleSendMessage}
                 disabled={!inputText.trim()}
                 size="icon"
                 className="h-10 w-10 shrink-0 rounded-full"
-                style={{
-                  backgroundColor: inputText.trim()
-                    ? "hsl(43 96% 56%)"
-                    : "hsl(220 15% 20%)",
-                  color: inputText.trim()
-                    ? "hsl(220 20% 8%)"
-                    : "hsl(220 10% 55%)",
-                }}
               >
                 <Send className="h-4 w-4" />
               </Button>

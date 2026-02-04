@@ -11,8 +11,6 @@ import CircuitBreaker from "@/lib/circuitBreaker";
 import connectDB from "@/lib/mongoose";
 import VinData from "@/models/AdminChat";
 
-connectDB();
-
 // === OpenAI Client Initialization ===
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -72,6 +70,8 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method != "POST") {
     res.status(500).json("Wrong request method!");
   }

@@ -7,7 +7,6 @@ import connectDB from "@/lib/mongoose";
 import { findEnrichedParts } from "@/helpers/orderParts";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-connectDB();
 
 function extractVinFromChat(chatMessages) {
   const vinRegex = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
@@ -40,6 +39,8 @@ export async function sendMessage(chatId, text) {
 }
 
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -64,23 +65,28 @@ export default async function handler(req, res) {
         `Creating an order using phone number: ${phoneNumber}`
       );
 
-      const pendingOrder = await PendingOrder.findOne({ chatId });
+      const pendingOrder = await PendingOrder.findOne({ chatId }).lean();
       if (!pendingOrder) {
         await sendMessage(chatId, "No pending order found.");
         return res.status(200).json({ status: "no pending order" });
       }
 
-      const chatDoc = await Chat.findOne({ "user.id": chatId });
+      const chatDoc = await Chat.findOne({ "user.id": chatId }).lean();
       const vin = chatDoc?.chat ? extractVinFromChat(chatDoc.chat) : null;
 
       const enrichedParts = findEnrichedParts(
         pendingOrder.partNumbers,
         chatDoc
       );
-      console.log("Enriched parts:", enrichedParts);
+      const plainParts = enrichedParts.map((p) =>
+        p.toObject ? p.toObject() : p
+      );
+      console.log("Enriched parts:", plainParts);
 
       // Validate each part has required fields
-      for (const part of enrichedParts) {
+      for (const part of plainParts) {
+        console.log("Part: ", part);
+
         if (
           !part.brand ||
           !part.partName ||
@@ -88,28 +94,47 @@ export default async function handler(req, res) {
           part.orderQuantity == null ||
           part.partPrice == null
         ) {
+          console.log(
+            `Part Data: ${part.brand}, ${part.partName}, ${part.article}, ${part.orderQuantit}, ${part.partPrice}`
+          );
           throw new Error("Missing required part data");
         }
       }
+
+      const orderId = Math.floor(
+        10000000000 + Math.random() * 900000
+      ).toString();
 
       const newUser = new User({
         phone: phoneNumber,
         name: message.from?.first_name || "Unknown",
         isVerified: true,
-        cars: vin ? [{ vin, make: "", model: "", year: 0 }] : [],
+        car: {
+          vin,
+          make: "",
+          model: "",
+          year: 0,
+          color: "",
+          mileage: 0,
+          licensePlate: "",
+          engine: "",
+          transmission: "",
+          driveType: "",
+          fuelType: "",
+        },
         parts: [
           {
+            id: orderId,
             items: enrichedParts.map((part) => ({
-              id: Math.floor(100000 + Math.random() * 900000).toString(),
+              partId: Math.floor(100000 + Math.random() * 900000).toString(),
               name: part.partName,
               brand: part.brand,
               article: part.article,
               quantity: part.orderQuantity,
               price: part.partPrice,
+              source: part.sources[0] || "unknown",
             })),
             purchaseDate: new Date(),
-            purchaseStatus: "pending",
-            repairWorkId: null,
           },
         ],
         chatId: {
@@ -121,16 +146,45 @@ export default async function handler(req, res) {
       await newUser.save();
       await PendingOrder.deleteOne({ chatId });
 
-      await sendMessage(chatId, "✅ Your Order Has Been Successfully Created!");
+      await sendMessage(
+        chatId,
+        `✅ Your Order Has Been Successfully Created! Your Order Id is ${orderId}!`
+      );
       await sendMessage(
         chatId,
         "We Also Have Repair Work Services, Do You Want To Make An Appointment?"
       );
+
+      await Chat.findOneAndUpdate(
+        { "user.id": chatId.toString() },
+        {
+          $push: {
+            chat: {
+              text:
+                `✅ Your Order Has Been Successfully Created! Your Order Id is ${orderId}!\n` +
+                `[SYSTEM_META: order_id="${orderId}"]`,
+              metadata: { role: "assistant" },
+            },
+          },
+        }
+      );
+      await Chat.findOneAndUpdate(
+        { "user.id": chatId.toString() },
+        {
+          $push: {
+            chat: {
+              text: "We Also Have Repair Work Services, Do You Want To Make An Appointment?",
+              metadata: { role: "assistant" },
+            },
+          },
+        }
+      );
+
       return res.status(200).json({ success: true, phoneNumber });
     } catch (err) {
       console.error("Error creating order:", err);
       await sendMessage(chatId, `❌ Error: ${err.message}`);
-      return res.status(500).json({ error: err.message });
+      return res.status(200).json({ error: err.message });
     }
   }
 

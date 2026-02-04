@@ -5,85 +5,67 @@ const reservationSchema = new mongoose.Schema(
     id: { type: String, required: true, unique: true },
     date: { type: Date, required: true },
     startTime: { type: String, required: true },
-    endTime: { type: String, required: true },
+    endTime: { type: String },
     client: {
       id: { type: String, required: true },
-      name: { type: String, required: true },
       phone: { type: String, required: true },
+      name: { type: String, required: true },
       email: { type: String },
-      repairHistory: [
-        {
-          id: { type: String, required: true },
-          title: { type: String, required: true },
-          clientName: { type: String, required: true },
-          clientPhone: { type: String, required: true },
-          car: {
-            vin: { type: String, required: true },
-            make: { type: String, required: true },
-            model: { type: String, required: true },
-            year: { type: Number, required: true },
-          },
-          laborCost: { type: Number, required: true },
-          completeDate: { type: Date, default: null },
-          status: {
-            type: String,
-            enum: ["appointed", "in-progress", "completed"],
-          },
-          notes: [{ type: String, default: "" }],
-        },
-      ],
+      car: {
+        vin: { type: String, required: true },
+        make: { type: String },
+        model: { type: String },
+        year: { type: Number },
+      },
     },
-    car: {
-      vin: { type: String, required: true },
-      make: { type: String, required: true },
-      model: { type: String, required: true },
-      year: { type: Number, required: true },
-    },
-    worker: {
-      id: { type: String, required: true, unique: true },
-      name: { type: String, required: true },
-      phone: { type: String, required: true },
-      speciality: { type: String, required: true },
-      currentMonthWorks: [
-        {
+    repairWorks: [
+      {
+        id: { type: String, required: true },
+        serviceType: { type: String, required: true },
+        description: { type: String, required: true },
+        status: {
+          type: String,
+          enum: ["appointed", "in-progress", "completed"],
+          default: "appointed",
+        },
+        cost: { type: Number, required: true },
+        assignedWorker: {
           id: { type: String, required: true },
-          title: { type: String, required: true },
-          clientName: { type: String, required: true },
-          clientPhone: { type: String, required: true },
-          car: {
-            vin: { type: String, required: true },
-            make: { type: String, required: true },
-            model: { type: String, required: true },
-            year: { type: Number, required: true },
+          name: { type: String, required: true },
+          phone: { type: String, required: true },
+        },
+        repairItems: [
+          {
+            id: { type: String, required: true },
+            name: { type: String, required: true },
+            partNumber: { type: String, required: true },
+            quantity: { type: Number, required: true },
+            unitPrice: { type: Number, required: true },
+            totalPrice: { type: Number, required: true },
+            purchaseDate: { type: Date, default: null },
+            arrivalDate: { type: Date, default: null },
+            status: {
+              type: String,
+              enum: ["pending", "ordered", "received", "installed"],
+              default: "pending",
+            },
           },
-          laborCost: { type: Number, required: true },
-          completeDate: { type: Date, default: null },
-          status: {
-            type: String,
-            enum: ["appointed", "in-progress", "completed"],
-            default: "appointed",
+        ],
+        repairPartsNeeded: [
+          {
+            master: { type: String, required: true },
+            parts: [String],
+            repair: { type: String, required: true },
+            status: {
+              type: String,
+              enum: ["pending", "ordered", "received", "installed"],
+              default: "pending",
+            },
           },
-          notes: { type: String, default: "" },
-        },
-      ],
-      totalEarned: { type: Number, required: true, default: 0 },
-      totalPaid: { type: Number, required: true, default: 0 },
-      payments: [
-        {
-          id: { type: String, required: true },
-          amount: { type: Number, required: true },
-          date: { type: Date, default: Date.now },
-          description: { type: String, default: "" },
-        },
-      ],
-      monthlyEarnings: [
-        {
-          month: { type: String, required: true },
-        },
-      ],
-    },
-    serviceType: { type: String, required: true },
-    estimatedCost: { type: Number, required: true },
+        ],
+        notes: [{ type: String, default: "" }],
+      },
+    ],
     status: {
       type: String,
       enum: ["scheduled", "in-progress", "completed", "cancelled"],

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Search,
   Plus,
@@ -37,7 +37,7 @@ const item = {
 
 export const Customers = ({ setActiveTab }) => {
   const setVin = useUser((state) => state.setVin);
-  const { records, messages, repairWorks, aiTips } = useCRM();
+  const { records, messages, repairWorks, aiTips, setAiTips } = useCRM();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -56,37 +56,67 @@ export const Customers = ({ setActiveTab }) => {
     );
   }, [searchQuery, records]);
 
-  const getUnreadMessages = (recordId) =>
-    messages.filter(
-      (m) => m.crmRecordId === recordId && !m.read && m.sender === "customer"
-    ).length;
-
   const getAITipsCount = (recordId) =>
-    aiTips.filter((t) => t.crmRecordId === recordId).length;
+    aiTips[recordId] != undefined ? aiTips[recordId]?.length : 0;
 
   const getActiveOrders = (recordId) =>
-    repairWorks.filter(
-      (r) => r.crmRecordId === recordId && r.status !== "completed"
-    ).length;
+    repairWorks[recordId].filter((r) => r.status !== "completed").length;
 
-  const selectedMessages = selectedRecord
-    ? messages.filter((m) => m.crmRecordId === selectedRecord.id)
-    : [];
+  const [selectedMessages, setSelectedMessages] = useState([]);
+  const [selectedRepairs, setSelectedRepairs] = useState([]);
+  const [selectedTips, setSelectedTips] = useState([]);
 
-  const selectedTips = selectedRecord
-    ? aiTips.filter((t) => t.crmRecordId === selectedRecord.id)
-    : [];
-
-  const selectedRepairs = selectedRecord
-    ? repairWorks.filter((r) => r.crmRecordId === selectedRecord.id)
-    : [];
-
-  // Summary stats
-  const totalUnread = messages.filter(
-    (m) => !m.read && m.sender === "customer"
+  const totalTips = Object.values(aiTips).length;
+  const highPriorityTips = Object.values(aiTips).filter(
+    (t) => t.priority === "high"
   ).length;
-  const totalTips = aiTips.length;
-  const highPriorityTips = aiTips.filter((t) => t.priority === "high").length;
+
+  const handleRenewAiTips = async () => {
+    try {
+      const res = await fetch("/api/ai/ai-tip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: selectedRecord.id }),
+      });
+      const tips = await res.json();
+
+      setAiTips({
+        [selectedRecord.id]: tips,
+      });
+
+      setSelectedTips(tips);
+
+      console.log("tips: ", [
+        tips.map((tip) => ({
+          id: tip.id,
+          type: tip.type,
+          title: tip.title,
+          description: tip.description,
+          priority: tip.priority,
+          createdAt: tip.date?.split("T")[0],
+        })),
+      ]);
+    } catch (error) {
+      console.error("Error:", error);
+    }
+  };
+
+  useEffect(() => {
+    const func = async () => {
+      setSelectedMessages(selectedRecord ? messages[selectedRecord.id] : []);
+      setSelectedRepairs(selectedRecord ? repairWorks[selectedRecord.id] : []);
+
+      if (Object.values(aiTips).length > 0) {
+        setSelectedTips(selectedRecord ? aiTips[selectedRecord.id] : []);
+      } else {
+        if (showAITips) {
+          await handleRenewAiTips();
+        }
+      }
+    };
+
+    selectedRecord != null && func();
+  }, [selectedRecord]);
 
   return (
     <div className="p-8">
@@ -138,10 +168,12 @@ export const Customers = ({ setActiveTab }) => {
             <MessageCircle className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-[hsl(43_96%_56%)]">
-              {totalUnread}
+            <p className="text-2xl font-bold text-[hsl(40_20%_95%)]">
+              {records.length}
             </p>
-            <p className="text-sm text-[hsl(220_15%_55%)]">Unread Messages</p>
+            <p className="text-sm text-[hsl(220_15%_55%)]">
+              Total Message Histories
+            </p>
           </div>
         </div>
 
@@ -231,7 +263,6 @@ export const Customers = ({ setActiveTab }) => {
               >
                 <CRMCard
                   record={record}
-                  unreadMessages={getUnreadMessages(record.id)}
                   aiTipsCount={getAITipsCount(record.id)}
                   activeOrders={getActiveOrders(record.id)}
                   onClick={() => {
@@ -360,12 +391,19 @@ export const Customers = ({ setActiveTab }) => {
                 )}
 
                 {/* AI Tips for Selected Record */}
-                {showAITips && selectedTips.length > 0 && (
-                  <AITipsPanel tips={selectedTips} />
+                {showAITips && selectedTips?.length > 0 && (
+                  <AITipsPanel
+                    tips={selectedTips}
+                    handleClick={handleRenewAiTips}
+                  />
                 )}
 
                 {/* Messages */}
-                <MessageHistory messages={selectedMessages} />
+                <MessageHistory
+                  chatId={selectedRecord.id}
+                  messages={selectedMessages}
+                  setMessages={setSelectedMessages}
+                />
               </>
             ) : (
               <motion.div

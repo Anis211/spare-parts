@@ -1,10 +1,9 @@
 import connectDB from "@/lib/mongoose";
 import User from "@/models/User";
 
-// Connect to MongoDB when the API route is accessed
-connectDB();
-
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method === "GET") {
     const { email } = req.query;
 
@@ -83,13 +82,11 @@ export default async function handler(req, res) {
         new: true,
       });
 
-      res
-        .status(201)
-        .json({
-          success: true,
-          message: "User updated successfully",
-          user: user,
-        });
+      res.status(201).json({
+        success: true,
+        message: "User updated successfully",
+        user: user,
+      });
     } catch (error) {
       console.error("Error updating user:", error);
       res.status(500).json({ error: "Internal server error" });

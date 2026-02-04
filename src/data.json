@@ -1,0 +1,13 @@
+[
+  {
+    "id": "1",
+    "name": "Alex Rodriguez",
+    "phone": "+1 (555) 987-6543",
+    "speciality": "Engine Diagnostics",
+    "currentMonthWorks": [],
+    "totalEarned": 2850,
+    "totalPaid": 2000,
+    "payments": [],
+    "monthlyEarnings": []
+  }
+]

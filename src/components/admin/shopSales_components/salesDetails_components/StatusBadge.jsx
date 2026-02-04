@@ -15,6 +15,18 @@ export const StatusBadge = ({ status, className }) => {
       text: "text-[hsl(142_71%_45%)]",
       border: "border border-[hsl(142_71%_45%_/_30%)]",
     },
+    appointed: {
+      label: "Appointed",
+      bg: "bg-[hsl(38_92%_50%_/_15%)]", // warning bg
+      text: "text-[hsl(38_92%_50%)]", // warning text (amber)
+      border: "border border-[hsl(38_92%_50%_/_30%)]",
+    },
+    scheduled: {
+      label: "Scheduled",
+      bg: "bg-[hsl(38_92%_50%_/_15%)]", // warning bg
+      text: "text-[hsl(38_92%_50%)]", // warning text (amber)
+      border: "border border-[hsl(38_92%_50%_/_30%)]",
+    },
     pending: {
       label: "Pending",
       bg: "bg-[hsl(38_92%_50%_/_15%)]", // warning bg

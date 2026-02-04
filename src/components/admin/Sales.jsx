@@ -5,7 +5,7 @@ import { RepairOrderCard } from "@/components/admin/shopSales_components/RepairO
 import { NewOrderDialog } from "@/components/admin/shopSales_components/NewOrderDialog";
 import { sampleOrders } from "@/data/sampleOrders";
 import { useToast } from "@/hooks/use-toast";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 
 function calculateOrderTotals(order) {
   let partsTotal = 0;
@@ -31,41 +31,49 @@ function calculateOrderTotals(order) {
   };
 }
 
-const ShopSales = ({ setActiveTab }) => {
+const ShopSales = ({ setActiveTab, setSelectedSalesTab }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState([]);
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
-  const [orders, setOrders] = useState(sampleOrders);
   const { toast } = useToast();
 
+  const [orders, setOrders] = useState([]);
+  const [filteredOrders, setFilteredOrders] = useState([]);
+
   useEffect(() => {
-    document.title = "Shop Sales - AutoRepair Admin";
-    const metaDescription = document.querySelector('meta[name="description"]');
-    if (metaDescription) {
-      metaDescription.setAttribute(
-        "content",
-        "Manage auto repair orders, track VIN numbers, client information, and repair work progress."
-      );
-    } else {
-      const meta = document.createElement("meta");
-      meta.name = "description";
-      meta.content =
-        "Manage auto repair orders, track VIN numbers, client information, and repair work progress.";
-      document.head.appendChild(meta);
-    }
-  }, []);
+    const find = async () => {
+      try {
+        const response = await fetch("/api/admin/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limitl: 0, limitr: 10 }),
+        });
+        const data = await response.json();
 
-  const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      order.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.clientPhone.includes(searchQuery);
+        setOrders(data.orders);
+        setFilteredOrders(
+          data.orders.filter((order) => {
+            const matchesSearch =
+              order.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              order.clientName
+                .toLowerCase()
+                .includes(searchQuery.toLowerCase()) ||
+              order.clientPhone.includes(searchQuery);
 
-    const matchesStatus =
-      statusFilters.length === 0 || statusFilters.includes(order.status);
+            const matchesStatus =
+              statusFilters.length === 0 ||
+              statusFilters.includes(order.status);
 
-    return matchesSearch && matchesStatus;
-  });
+            return matchesSearch && matchesStatus;
+          })
+        );
+      } catch (err) {
+        console.warn("Error While Fetching Orders: ", err.message);
+      }
+    };
+
+    orders.length == 0 && find();
+  }, [orders]);
 
   const totalRevenue = orders.reduce(
     (sum, o) => sum + calculateOrderTotals(o).grandTotal,
@@ -168,15 +176,17 @@ const ShopSales = ({ setActiveTab }) => {
 
         {/* Orders Grid */}
         <div className="grid grid-cols-3 gap-6">
-          {filteredOrders.map((order, index) => (
-            <RepairOrderCard
-              setActiveTab={setActiveTab}
-              key={order.id}
-              order={order}
-              className="opacity-0 animate-fade-in"
-              style={{ animationDelay: `${index * 100}ms` }}
-            />
-          ))}
+          <AnimatePresence>
+            {filteredOrders.length > 0 &&
+              filteredOrders.map((order, index) => (
+                <RepairOrderCard
+                  setActiveTab={setActiveTab}
+                  setSelectedSalesTab={setSelectedSalesTab}
+                  key={order.id}
+                  order={order}
+                />
+              ))}
+          </AnimatePresence>
         </div>
 
         {filteredOrders.length === 0 && (

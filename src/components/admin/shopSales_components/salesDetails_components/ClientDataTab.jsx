@@ -2,41 +2,7 @@
 import { Car, User, Phone, Mail, MapPin, FileText, Shield } from "lucide-react";
 import { motion } from "framer-motion";
 
-const clientData = {
-  personal: {
-    name: "Sarah Williams",
-    phone: "+1 (555) 987-6543",
-    email: "sarah.williams@email.com",
-    address: "1234 Oak Street, Los Angeles, CA 90001",
-  },
-  vehicle: {
-    vin: "WBA8E1C55JA765432",
-    make: "BMW",
-    model: "330i",
-    year: 2018,
-    color: "Alpine White",
-    mileage: "67,450 mi",
-    licensePlate: "7ABC123",
-    engine: "2.0L Turbo I4",
-    transmission: "8-Speed Automatic",
-    driveType: "RWD",
-    fuelType: "Premium Gasoline",
-  },
-  registration: {
-    registrationDate: "Mar 15, 2023",
-    expirationDate: "Mar 15, 2024",
-    insuranceProvider: "Progressive",
-    policyNumber: "PRO-2024-789456",
-  },
-  serviceHistory: {
-    firstVisit: "Jan 10, 2023",
-    totalVisits: 8,
-    lastService: "Dec 10, 2025",
-    totalSpent: "$1,245.50",
-  },
-};
-
-export const ClientDataTab = () => {
+export const ClientDataTab = ({ clientData }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 40 }}
@@ -82,12 +48,6 @@ export const ClientDataTab = () => {
               <Mail className="h-4 w-4 text-[hsl(220_10%_55%)]" />
               <span className="text-[hsl(220_10%_95%)]">
                 {clientData.personal.email}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <MapPin className="h-4 w-4 text-[hsl(220_10%_55%)]" />
-              <span className="text-[hsl(220_10%_95%)]">
-                {clientData.personal.address}
               </span>
             </div>
           </div>
@@ -206,57 +166,6 @@ export const ClientDataTab = () => {
                   {clientData.vehicle.licensePlate}
                 </p>
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Registration & Insurance */}
-      <section className="bg-[hsl(222_47%_9%)] border-1 border-[hsl(220_15%_18%)] rounded-xl p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 rounded-lg bg-[hsl(36_100%_50%_/_10%)]">
-            <Shield className="h-5 w-5 text-[hsl(36_100%_50%)]" />
-          </div>
-          <h2 className="text-2xl font-bold text-[hsl(220_10%_95%)]">
-            Registration & Insurance
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-3">
-            <div>
-              <span className="text-md text-[hsl(220_10%_55%)]">
-                Registration Date
-              </span>
-              <p className="font-medium text-[hsl(220_10%_95%)]">
-                {clientData.registration.registrationDate}
-              </p>
-            </div>
-            <div>
-              <span className="text-md text-[hsl(220_10%_55%)]">
-                Expiration Date
-              </span>
-              <p className="font-medium text-[hsl(220_10%_95%)]">
-                {clientData.registration.expirationDate}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <span className="text-md text-[hsl(220_10%_55%)]">
-                Insurance Provider
-              </span>
-              <p className="font-medium text-[hsl(220_10%_95%)]">
-                {clientData.registration.insuranceProvider}
-              </p>
-            </div>
-            <div>
-              <span className="text-md text-[hsl(220_10%_55%)]">
-                Policy Number
-              </span>
-              <p className="font-medium text-[hsl(220_10%_95%)]">
-                {clientData.registration.policyNumber}
-              </p>
             </div>
           </div>
         </div>

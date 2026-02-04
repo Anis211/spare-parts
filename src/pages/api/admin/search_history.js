@@ -1,9 +1,9 @@
 import connectDB from "@/lib/mongoose";
 import VinData from "@/models/AdminChat";
 
-connectDB();
-
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method === "GET") {
     const { limitl, limitr } = req.query;
     console.log("GET Request Params:", req.query);

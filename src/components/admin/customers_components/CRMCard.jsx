@@ -1,20 +1,7 @@
 "use client";
-import {
-  Car,
-  Phone,
-  Calendar,
-  MessageCircle,
-  ChevronRight,
-  Sparkles,
-} from "lucide-react";
+import { Car, Phone, Calendar, ChevronRight, Sparkles } from "lucide-react";
 
-export const CRMCard = ({
-  record,
-  unreadMessages,
-  aiTipsCount,
-  activeOrders,
-  onClick,
-}) => {
+export const CRMCard = ({ record, aiTipsCount, activeOrders, onClick }) => {
   return (
     <div
       className="bg-[hsl(222_40%_9%)]/80 backdrop-blur-xl border-1 border-[hsl(222_30%_18%)]/50 shadow-lg rounded-xl p-5 cursor-pointer hover:border-[hsl(43_96%_56%)] transition-all duration-300 animate-slide-up"
@@ -50,18 +37,6 @@ export const CRMCard = ({
 
         {/* Badges */}
         <div className="flex items-center gap-2">
-          {unreadMessages > 0 && (
-            <span
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full"
-              style={{
-                backgroundColor: "hsl(43 96% 56% / 0.2)",
-                color: "hsl(43 96% 56%)",
-              }}
-            >
-              <MessageCircle className="w-3 h-3" />
-              {unreadMessages}
-            </span>
-          )}
           {aiTipsCount > 0 && (
             <span
               className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full"
@@ -121,7 +96,8 @@ export const CRMCard = ({
           style={{ backgroundColor: "hsl(222 30% 14%)" }}
         >
           <p className="text-lg font-bold text-[hsl(40_20%_95%)]">
-            {record.lastVisit.split("-")[1]}/{record.lastVisit.split("-")[2]}
+            {record.lastVisit != null && record.lastVisit?.split("-")[1]}/
+            {record.lastVisit?.split("-")[2]}
           </p>
           <p className="text-xs text-[hsl(220_15%_55%)]">Last Visit</p>
         </div>

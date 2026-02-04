@@ -16,7 +16,7 @@ const buttonVariants = cva(
           "border border-[hsl(220_15%_20%)] bg-transparent hover:bg-[hsl(220_15%_18%)] hover:text-[hsl(45_10%_85%)]",
         secondary:
           "bg-[hsl(220_15%_18%)] text-[hsl(45_10%_85%)] hover:bg-[hsl(220_15%_18%)/0.8]",
-        ghost: "hover:bg-[hsl(220_15%_18%)] hover:text-[hsl(45_10%_85%)]",
+        ghost: "hover:bg-[hsl(220_15%_18%)] text-[hsl(45_10%_85%)]",
         link: "text-[hsl(43_96%_56%)] underline-offset-4 hover:underline",
         glow: "bg-[hsl(43_96%_56%)] text-[hsl(220_20%_8%)] shadow-[0_0_20px_hsl(43_96%_56%/0.3)] hover:shadow-[0_0_30px_hsl(43_96%_56%/0.5)] hover:scale-101 active:scale-95",
         voice:
@@ -38,7 +38,7 @@ const buttonVariants = cva(
       variant: "default",
       size: "default",
     },
-  }
+  },
 );
 
 const Button = React.forwardRef(
@@ -51,7 +51,7 @@ const Button = React.forwardRef(
         {...props}
       />
     );
-  }
+  },
 );
 
 Button.displayName = "Button";

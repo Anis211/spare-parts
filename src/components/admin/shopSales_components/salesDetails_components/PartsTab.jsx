@@ -3,83 +3,7 @@ import { Package, Clock } from "lucide-react";
 import { StatusBadge } from "@/components/admin/shopSales_components/salesDetails_components/StatusBadge";
 import { motion } from "framer-motion";
 
-const currentParts = [
-  {
-    id: 1,
-    name: "Brake Pads Set",
-    partNumber: "BP-2024-001",
-    quantity: 2,
-    price: 89.99,
-    status: "delivered",
-    orderDate: "Dec 18, 2025",
-    deliveryDate: "Dec 20, 2025",
-  },
-  {
-    id: 2,
-    name: "Oil Filter",
-    partNumber: "OF-2024-045",
-    quantity: 1,
-    price: 24.99,
-    status: "shipped",
-    orderDate: "Dec 19, 2025",
-    deliveryDate: "—",
-  },
-  {
-    id: 3,
-    name: "Spark Plugs (4pc)",
-    partNumber: "SP-2024-112",
-    quantity: 1,
-    price: 45.0,
-    status: "ordered",
-    orderDate: "Dec 20, 2025",
-    deliveryDate: "—",
-  },
-  {
-    id: 4,
-    name: "Air Filter",
-    partNumber: "AF-2024-078",
-    quantity: 1,
-    price: 32.5,
-    status: "pending",
-    orderDate: "Dec 21, 2025",
-    deliveryDate: "—",
-  },
-];
-
-const historyParts = [
-  {
-    id: 5,
-    name: "Transmission Fluid",
-    partNumber: "TF-2024-022",
-    quantity: 4,
-    price: 15.99,
-    status: "delivered",
-    orderDate: "Dec 10, 2025",
-    deliveryDate: "Dec 12, 2025",
-  },
-  {
-    id: 6,
-    name: "Coolant (1L)",
-    partNumber: "CL-2024-033",
-    quantity: 2,
-    price: 18.5,
-    status: "delivered",
-    orderDate: "Dec 08, 2025",
-    deliveryDate: "Dec 10, 2025",
-  },
-  {
-    id: 7,
-    name: "Wiper Blades",
-    partNumber: "WB-2024-056",
-    quantity: 2,
-    price: 28.0,
-    status: "delivered",
-    orderDate: "Dec 05, 2025",
-    deliveryDate: "Dec 07, 2025",
-  },
-];
-
-export const PartsTab = () => {
+export const PartsTab = ({ currentParts, historyParts }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 40 }}
@@ -136,7 +60,12 @@ export const PartsTab = () => {
                         Order Date
                       </span>
                       <p className="font-medium text-[hsl(220_10%_95%)]">
-                        {part.orderDate}
+                        {part.orderDate.split("T")[0] +
+                          "  " +
+                          part.orderDate
+                            .split("T")[1]
+                            .split(".")[0]
+                            .slice(0, 5)}
                       </p>
                     </div>
                     <div>
@@ -207,7 +136,9 @@ export const PartsTab = () => {
                     ${part.price.toFixed(2)}
                   </td>
                   <td className="p-4 text-md text-[hsl(220_10%_55%)] hidden md:table-cell">
-                    {part.orderDate}
+                    {part.orderDate.split("T")[0] +
+                      " " +
+                      part.orderDate.split("T")[1].split(".")[0]}
                   </td>
                   <td className="p-4">
                     <StatusBadge status={part.status} />

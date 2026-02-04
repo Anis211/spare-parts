@@ -3,6 +3,7 @@ import { Calendar, Phone, User, Wrench, Car, Clock } from "lucide-react";
 import { Badge } from "@/components/admin/ui/sales/badge";
 import useUser from "@/zustand/user";
 import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
 
 const statusConfig = {
   "in-progress": {
@@ -34,6 +35,7 @@ const statusConfig = {
 function calculateOrderTotals(order) {
   let partsTotal = 0;
   let laborTotal = 0;
+
   const works = Array.isArray(order?.repairWorks) ? order.repairWorks : [];
   works.forEach((work) => {
     laborTotal += work?.laborCost || 0;
@@ -43,6 +45,7 @@ function calculateOrderTotals(order) {
     });
   });
   const grandTotal = partsTotal + laborTotal;
+
   return {
     partsTotal: parseFloat(partsTotal.toFixed(2)),
     laborTotal: parseFloat(laborTotal.toFixed(2)),
@@ -50,22 +53,34 @@ function calculateOrderTotals(order) {
   };
 }
 
-export function RepairOrderCard({ setActiveTab, order, style }) {
+export function RepairOrderCard({
+  setActiveTab,
+  setSelectedSalesTab,
+  order,
+  style,
+}) {
   const status = statusConfig[order.status] || statusConfig.pending;
   const totals = calculateOrderTotals(order);
-  const repairWorkNames = order.repairWorks?.map((w) => w.name) || [];
+  const repairWorkNames = order.repairWorks?.map((w) => w.name);
+
+  console.log("Repair Works Names: ", repairWorkNames);
 
   const setSalesTab = useUser((state) => state.setSalesTab);
   const setVin = useUser((state) => state.setVin);
 
   const handleClick = () => {
     setVin(order.vin);
+    setSelectedSalesTab(order);
     setSalesTab("Details");
     setActiveTab("Details");
   };
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      transition={{ duration: 0.5, type: "spring" }}
       onClick={handleClick}
       className="group rounded-xl border-[hsl(222_30%_18%)] bg-[hsl(222_47%_9%)] p-5 transition-all duration-300 hover:ring-1 hover:ring-[hsl(40_95%_55%)]/60 hover:shadow-lg hover:shadow-[hsl(40_95%_55%)]/5 animate-fade-in cursor-pointer"
       style={style}
@@ -138,7 +153,11 @@ export function RepairOrderCard({ setActiveTab, order, style }) {
         <div>
           <p className="text-sm text-[hsl(220_15%_55%)]">Repair Worker</p>
           <p className="text-md font-medium text-[hsl(40_15%_95%)]">
-            {order.workerName}
+            {order.repairWorks.map((repairWork) =>
+              order.repairWorks.length > 1
+                ? repairWork.assignedWorker.name + ", "
+                : repairWork.assignedWorker.name
+            ) || "Unassigned"}
           </p>
         </div>
       </div>
@@ -170,6 +189,6 @@ export function RepairOrderCard({ setActiveTab, order, style }) {
           })}
         </p>
       </div>
-    </div>
+    </motion.div>
   );
 }

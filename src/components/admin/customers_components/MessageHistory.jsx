@@ -1,16 +1,79 @@
 "use client";
-import { useState } from "react";
-import { MessageCircle, Send, User, Bot } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { MessageCircle, Send, User, Bot, ArrowDown } from "lucide-react";
 import { Input } from "@/components/admin/ui/customers/input";
 import { Button } from "@/components/admin/ui/customers/button";
+import { motion } from "framer-motion";
 
-export const MessageHistory = ({ messages, onSendMessage }) => {
+export const MessageHistory = ({ chatId, messages, setMessages }) => {
   const [newMessage, setNewMessage] = useState("");
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  const handleSend = () => {
-    if (newMessage.trim() && onSendMessage) {
-      onSendMessage(newMessage.trim());
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  // Auto-scroll when new messages arrive AND we're near bottom
+  useEffect(() => {
+    if (messages.length > 0) {
+      const container = chatContainerRef.current;
+      if (!container) return;
+
+      // Check if user is near bottom (within 150px)
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop <=
+        container.clientHeight + 150;
+
+      if (isNearBottom) {
+        scrollToBottom();
+      } else {
+        // Show scroll button if user is scrolled up
+        setShowScrollButton(true);
+      }
+    }
+  }, [messages]);
+
+  // Track manual scroll position
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop <=
+        container.clientHeight + 150;
+
+      setShowScrollButton(!isNearBottom);
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+
+    setShowScrollButton(false);
+  };
+
+  const handleSend = async () => {
+    if (newMessage.trim()) {
+      const response = await fetch("/api/chat/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: newMessage, chatId: chatId }),
+      });
+      const data = await response.json();
+
+      setMessages((prev) => [
+        ...prev,
+        { content: newMessage, sender: "shop", timestamp: Date.now() },
+      ]);
       setNewMessage("");
+
+      console.log("Message Sent: ", data);
     }
   };
 
@@ -58,6 +121,7 @@ export const MessageHistory = ({ messages, onSendMessage }) => {
       <div
         className="h-80 overflow-y-auto p-4 space-y-4"
         style={{ color: "hsl(40 20% 95%)" }}
+        ref={chatContainerRef}
       >
         {messages.length === 0 ? (
           <div
@@ -87,7 +151,7 @@ export const MessageHistory = ({ messages, onSendMessage }) => {
 
             return (
               <div
-                key={message.id}
+                key={index}
                 className={`flex gap-3 animate-slide-up ${
                   message.sender === "shop" ? "flex-row-reverse" : ""
                 }`}
@@ -130,19 +194,32 @@ export const MessageHistory = ({ messages, onSendMessage }) => {
                     style={{ color: "hsl(220 15% 55%)" }}
                   >
                     {formatTime(message.timestamp)}
-                    {!message.read && message.sender === "customer" && (
-                      <span
-                        className="ml-2"
-                        style={{ color: "hsl(43 96% 56%)" }}
-                      >
-                        • New
-                      </span>
-                    )}
                   </p>
                 </div>
               </div>
             );
           })
+        )}
+        <div ref={messagesEndRef} className="h-4" />
+
+        {showScrollButton && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.2 }}
+            className="absolute bottom-[7%] right-[5%] z-20"
+          >
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={scrollToBottom}
+              className="rounded-full shadow-md hover:shadow-lg transition-shadow backdrop-blur-md"
+              aria-label="Scroll to latest message"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          </motion.div>
         )}
       </div>
 

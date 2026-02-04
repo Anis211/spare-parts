@@ -5,6 +5,7 @@ import {
   Wrench,
   Bell,
   AlertTriangle,
+  ClockArrowUp,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -52,7 +53,7 @@ const priorityBadge = {
   },
 };
 
-export const AITipsPanel = ({ tips, onDismiss }) => {
+export const AITipsPanel = ({ tips, onDismiss, handleClick }) => {
   if (tips.length === 0) return null;
 
   return (
@@ -61,8 +62,7 @@ export const AITipsPanel = ({ tips, onDismiss }) => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
       transition={{ duration: 0.6, type: "spring" }}
-      className="glass-card rounded-xl p-5 animate-fade-in"
-      style={{ background: "hsl(222 40% 9%)" }}
+      className="bg-[hsl(222_40%_9%)]/80 backdrop-blur-xl border border-[hsl(222_30%_18%)]/50 shadow-lg rounded-xl p-5 animate-fade-in"
     >
       <div className="flex items-center gap-2 mb-4">
         <div
@@ -82,6 +82,19 @@ export const AITipsPanel = ({ tips, onDismiss }) => {
             Smart recommendations for this customer
           </p>
         </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          transition={{ duration: 0.6, type: "spring" }}
+          className="self-end ml-12 w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{
+            background:
+              "linear-gradient(135deg, hsl(43 96% 56%), hsl(38 92% 50%))",
+          }}
+          onClick={handleClick}
+        >
+          <ClockArrowUp className="w-4 h-4 text-[hsl(222_47%_6%)]" />
+        </motion.button>
       </div>
 
       <div className="space-y-3">
@@ -95,7 +108,7 @@ export const AITipsPanel = ({ tips, onDismiss }) => {
           return (
             <div
               key={tip.id}
-              className="p-4 rounded-lg transition-all duration-200 hover:scale-[1.01] animate-slide-up"
+              className="p-4 rounded-lg transition-all duration-200 hover:scale-[1.02] animate-slide-up"
               style={{
                 backgroundColor: config.bgColor,
                 border: `1px solid ${config.borderColor}`,

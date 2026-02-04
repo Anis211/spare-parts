@@ -12,9 +12,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import AIAssistant from "@/components/repair/AIAssistant";
 import CalendarWorkload from "@/components/repair/CalendarWorkload";
 import Earnings from "@/components/repair/Earnings";
-import { useState } from "react";
-import { useRouter } from "next/router";
 import useUser from "@/zustand/user";
+import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
 
 const titles = [
   { title: "AI Assistant", icon: Bot },
@@ -27,12 +27,50 @@ const titles = [
 export default function Index() {
   const router = useRouter();
   const setUser = useUser((state) => state.setUser);
+
+  const [messages, setMessages] = useState([]);
+  const [worker, setWorker] = useState(null);
+
   const [activeTab, setActiveTab] = useState("AI");
   const [isRolled, setIsRolled] = useState(false);
 
+  useEffect(() => {
+    const fetchWorkerData = async () => {
+      const chat = [];
+
+      try {
+        const res = await fetch(`/api/repair/worker-data?id=${3}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+        const data = await res.json();
+        console.log("Worker data:", data);
+
+        if (data[0].chat?.messages.length != 0) {
+          for (const message of data[0].chat.messages) {
+            chat.push({
+              role: message.metadata.role,
+              content: message.text,
+              time: message.metadata.createdAt.split("T")[1].slice(0, -5),
+            });
+          }
+        }
+
+        setMessages(chat);
+        setWorker(data);
+      } catch (error) {
+        console.error("Error fetching worker data:", error);
+      }
+    };
+
+    worker == null && fetchWorkerData();
+  }, [worker]);
+
   return (
     <div className="flex flex-row">
-      {!isRolled ? (
+      {isRolled ? (
         <motion.div
           initial={{ width: ["60%", "0%"] }}
           animate={{ width: ["0%", "60%"] }}
@@ -51,7 +89,7 @@ export default function Index() {
               </div>
             </div>
             <button className="text-[hsl(0_84%_60%)] hover:text-[hsl(0_84%_60%)] hover:bg-[hsl(0_84%_60%_/_0.1)]">
-              <X onClick={() => setIsRolled(true)} />
+              <X onClick={() => setIsRolled(false)} />
             </button>
           </div>
           <div className="flex flex-col gap-2">
@@ -120,7 +158,9 @@ export default function Index() {
         <AnimatePresence>
           {activeTab == "Calendar" && <CalendarWorkload />}
           {activeTab == "Earnings" && <Earnings />}
-          {activeTab == "AI" && <AIAssistant />}
+          {activeTab == "AI" && (
+            <AIAssistant messages={messages} setMessages={setMessages} />
+          )}
         </AnimatePresence>
       </div>
     </div>

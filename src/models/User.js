@@ -6,14 +6,19 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true },
     email: { type: String },
     isVerified: { type: Boolean, default: false },
-    cars: [
-      {
-        vin: { type: String, required: true },
-        make: { type: String },
-        model: { type: String },
-        year: { type: Number },
-      },
-    ],
+    car: {
+      vin: { type: String, required: true },
+      make: { type: String },
+      model: { type: String },
+      year: { type: Number },
+      color: { type: String },
+      mileage: { type: Number },
+      licensePlate: { type: String },
+      engine: { type: String },
+      transmission: { type: String },
+      driveType: { type: String },
+      fuelType: { type: String },
+    },
     repairWorks: [
       {
         id: { type: String, required: true },
@@ -26,35 +31,52 @@ const userSchema = new mongoose.Schema(
         cost: { type: Number, required: true },
         arrivalDate: { type: Date, default: Date.now },
         completedDate: { type: Date, default: null },
-        assignedWorker: { type: String, default: null },
-        repairItems: [String],
+        assignedWorker: {
+          id: { type: String, required: true },
+          name: { type: String, required: true },
+          phone: { type: String, required: true },
+        },
+        repairItems: [
+          {
+            partsId: { type: String, required: true },
+            items: [String],
+          },
+        ],
+        notes: [{ type: String, default: "" }],
       },
     ],
     parts: [
       {
+        id: { type: String, required: true, unique: true },
         items: [
           {
-            id: { type: String, required: true },
+            partId: { type: String, required: true },
             name: { type: String, required: true },
             brand: { type: String, required: true },
             article: { type: String, required: true },
             quantity: { type: Number, required: true },
             price: { type: Number, required: true },
+            source: { type: String, required: true },
+            arrivalDate: { type: Date, default: null },
+            status: {
+              type: String,
+              enum: ["pending", "ordered", "received", "installed"],
+              default: "pending",
+            },
           },
         ],
         purchaseDate: { type: Date, default: null },
-        purchaseStatus: {
-          type: String,
-          enum: ["pending", "paid"],
-          default: "pending",
-        },
-        repairWorkId: { type: String, default: null },
       },
     ],
     aiTips: [
       {
         id: { type: String, required: true },
         type: { type: String, required: true },
+        priority: {
+          type: String,
+          enum: ["low", "medium", "high"],
+          default: "low",
+        },
         title: { type: String, required: true },
         description: { type: String, required: true },
         date: { type: Date, default: Date.now },
@@ -64,8 +86,24 @@ const userSchema = new mongoose.Schema(
       source: { type: String, required: true },
       id: { type: String, required: true, unique: true },
     },
+    firstVisit: { type: Date, default: null },
     lastVisit: { type: Date, default: null },
     nextAppointment: { type: Date, default: null },
+    totalSpent: { type: Number, default: 0 },
+    totalVisits: { type: Number, default: 0 },
+    futureNotes: [
+      {
+        id: { type: String, required: true },
+        master: { type: String, required: true },
+        note: { type: String, required: true },
+        priority: {
+          type: String,
+          enum: ["low", "medium", "high"],
+          default: "low",
+        },
+        date: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

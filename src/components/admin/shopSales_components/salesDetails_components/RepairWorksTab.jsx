@@ -1,112 +1,21 @@
 "use client";
-import { Wrench, Clock, User, AlertCircle, ClipboardList } from "lucide-react";
+import {
+  Wrench,
+  Clock,
+  User,
+  AlertCircle,
+  ClipboardList,
+  CircleOff,
+} from "lucide-react";
 import { StatusBadge } from "@/components/admin/shopSales_components/salesDetails_components/StatusBadge";
 import { motion } from "framer-motion";
 
-const currentRepairs = [
-  {
-    id: 1,
-    name: "Engine Diagnostics",
-    master: {
-      name: "Alex Rodriguez",
-      phone: "+1 (555) 987-6543",
-      avatar: "AR",
-    },
-    status: "in-progress",
-    startDate: "Dec 18, 2025",
-    estimatedEnd: "Dec 22, 2025",
-    notes:
-      "Checking engine codes and performance metrics. Found some irregularities in cylinder 3.",
-  },
-  {
-    id: 2,
-    name: "Brake System Inspection",
-    master: { name: "Mike Johnson", phone: "+1 (555) 123-4567", avatar: "MJ" },
-    status: "pending",
-    startDate: "Dec 20, 2025",
-    estimatedEnd: "Dec 21, 2025",
-    notes: "Waiting for brake pads delivery to proceed.",
-  },
-];
-
-const historyRepairs = [
-  {
-    id: 3,
-    name: "Oil Change",
-    master: {
-      name: "Carlos Martinez",
-      phone: "+1 (555) 456-7890",
-      avatar: "CM",
-    },
-    status: "completed",
-    startDate: "Dec 10, 2025",
-    completedDate: "Dec 10, 2025",
-    cost: 85.0,
-  },
-  {
-    id: 4,
-    name: "Tire Rotation",
-    master: {
-      name: "Alex Rodriguez",
-      phone: "+1 (555) 987-6543",
-      avatar: "AR",
-    },
-    status: "completed",
-    startDate: "Dec 08, 2025",
-    completedDate: "Dec 08, 2025",
-    cost: 45.0,
-  },
-  {
-    id: 5,
-    name: "Air Filter Replacement",
-    master: { name: "Mike Johnson", phone: "+1 (555) 123-4567", avatar: "MJ" },
-    status: "completed",
-    startDate: "Dec 05, 2025",
-    completedDate: "Dec 05, 2025",
-    cost: 35.5,
-  },
-];
-
-const futureRepairNotes = [
-  {
-    id: 1,
-    master: "Alex Rodriguez",
-    note: "Recommend transmission fluid change in next 5,000 miles",
-    priority: "medium",
-    date: "Dec 18, 2025",
-  },
-  {
-    id: 2,
-    master: "Mike Johnson",
-    note: "Front brake rotors showing wear - consider replacement soon",
-    priority: "high",
-    date: "Dec 15, 2025",
-  },
-  {
-    id: 3,
-    master: "Carlos Martinez",
-    note: "Serpentine belt starting to show cracks, schedule replacement",
-    priority: "low",
-    date: "Dec 10, 2025",
-  },
-];
-
-const partsNeededNotes = [
-  {
-    id: 1,
-    master: "Alex Rodriguez",
-    parts: ["Spark Plug Set (4pc)", "Ignition Coil"],
-    repair: "Engine Diagnostics",
-  },
-  {
-    id: 2,
-    master: "Mike Johnson",
-    parts: ["Front Brake Pads", "Brake Fluid DOT 4"],
-    repair: "Brake System Inspection",
-  },
-];
-
-export const RepairWorksTab = () => {
+export const RepairWorksTab = ({
+  currentRepairs,
+  historyRepairs,
+  futureRepairNotes,
+  partsNeededNotes,
+}) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 40 }}
@@ -201,33 +110,48 @@ export const RepairWorksTab = () => {
           </h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          {partsNeededNotes.map((note) => (
-            <div
-              key={note.id}
-              className="bg-[hsl(222_47%_9%)] border-1 border-[hsl(220_15%_18%)] rounded-xl p-5"
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <User className="h-4 w-4 text-[hsl(220_10%_55%)]" />
-                <span className="text-md font-medium text-[hsl(220_10%_95%)]">
-                  {note.master}
-                </span>
-              </div>
-              <p className="text-md text-[hsl(220_10%_55%)] mb-3">
-                For: {note.repair}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {note.parts.map((part, idx) => (
-                  <span
-                    key={idx}
-                    className="px-3 py-1.5 rounded-lg bg-[hsl(222_30%_15%)] text-md text-[hsl(220_10%_95%)]"
-                  >
-                    {part}
+        <div
+          className={`${
+            partsNeededNotes.length > 0
+              ? "grid grid-cols-2 gap-4"
+              : "flex justify-center"
+          }`}
+        >
+          {partsNeededNotes.length > 0 ? (
+            partsNeededNotes.map((note) => (
+              <div
+                key={note.id}
+                className="bg-[hsl(222_47%_9%)] border-1 border-[hsl(220_15%_18%)] rounded-xl p-5"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <User className="h-4 w-4 text-[hsl(220_10%_55%)]" />
+                  <span className="text-md font-medium text-[hsl(220_10%_95%)]">
+                    {note.master}
                   </span>
-                ))}
+                </div>
+                <p className="text-md text-[hsl(220_10%_55%)] mb-3">
+                  For: {note.repair}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {note.parts.map((part, idx) => (
+                    <span
+                      key={idx}
+                      className="px-3 py-1.5 rounded-lg bg-[hsl(222_30%_15%)] text-md text-[hsl(220_10%_95%)]"
+                    >
+                      {part}
+                    </span>
+                  ))}
+                </div>
               </div>
+            ))
+          ) : (
+            <div className="flex flex-row gap-2 items-center justify-center py-8 text-[hsl(220_10%_55%)] text-center">
+              <CircleOff className="h-8 w-8 mb-4" />
+              <h3 className="text-lg font-semibold mb-4">
+                No parts needed for current work available
+              </h3>
             </div>
-          ))}
+          )}
         </div>
       </section>
 
@@ -243,31 +167,40 @@ export const RepairWorksTab = () => {
         </div>
 
         <div className="space-y-3">
-          {futureRepairNotes.map((note) => (
-            <div
-              key={note.id}
-              className="bg-[hsl(222_47%_9%)] border-1 border-[hsl(220_15%_18%)] rounded-xl p-4 flex items-start gap-4"
-            >
+          {futureRepairNotes.length > 0 ? (
+            futureRepairNotes.map((note) => (
               <div
-                className="w-2 h-2 rounded-full mt-2"
-                style={{
-                  backgroundColor:
-                    note.priority === "high"
-                      ? "hsl(0 72% 51%)" // --destructive
-                      : note.priority === "medium"
-                      ? "hsl(38 92% 50%)" // --warning
-                      : "hsl(142 71% 45%)", // --success
-                }}
-              />
-              <div className="flex-1">
-                <p className="text-[hsl(220_10%_95%)]">{note.note}</p>
-                <div className="flex items-center gap-4 mt-2 text-md text-[hsl(220_10%_55%)]">
-                  <span>By: {note.master}</span>
-                  <span>{note.date}</span>
+                key={note.id}
+                className="bg-[hsl(222_47%_9%)] border-1 border-[hsl(220_15%_18%)] rounded-xl p-4 flex items-start gap-4"
+              >
+                <div
+                  className="w-2 h-2 rounded-full mt-2"
+                  style={{
+                    backgroundColor:
+                      note.priority === "high"
+                        ? "hsl(0 72% 51%)" // --destructive
+                        : note.priority === "medium"
+                        ? "hsl(38 92% 50%)" // --warning
+                        : "hsl(142 71% 45%)", // --success
+                  }}
+                />
+                <div className="flex-1">
+                  <p className="text-[hsl(220_10%_95%)]">{note.note}</p>
+                  <div className="flex items-center gap-4 mt-2 text-md text-[hsl(220_10%_55%)]">
+                    <span>By: {note.master}</span>
+                    <span>{note.date}</span>
+                  </div>
                 </div>
               </div>
+            ))
+          ) : (
+            <div className="flex flex-row gap-2 items-center justify-center py-8 text-[hsl(220_10%_55%)] text-center">
+              <CircleOff className="h-8 w-8 mb-4" />
+              <h3 className="text-lg font-semibold mb-4">
+                No future repair notes available
+              </h3>
             </div>
-          ))}
+          )}
         </div>
       </section>
 

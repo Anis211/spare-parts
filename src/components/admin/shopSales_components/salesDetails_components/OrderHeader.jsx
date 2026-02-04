@@ -85,7 +85,7 @@ export const OrderHeader = ({
               <div>
                 <p className="text-sm text-[hsl(220_10%_55%)]">Total Cost</p>
                 <p className="font-medium text-[hsl(36_100%_50%)] text-lg">
-                  ${totalCost.toFixed(2)}
+                  {totalCost} тг
                 </p>
               </div>
             </div>

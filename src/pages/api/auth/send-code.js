@@ -3,9 +3,9 @@ import OTP from "@/models/admin/Otp";
 import smsProvider from "@/lib/sms";
 import connectDB from "@/lib/mongoose";
 
-connectDB();
-
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }

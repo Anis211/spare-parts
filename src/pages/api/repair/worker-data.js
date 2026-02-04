@@ -1,19 +1,19 @@
 import connectDB from "@/lib/mongoose";
-import Total from "@/models/Total";
-
-// Connect to MongoDB when the API route is accessed
-connectDB();
+import Worker from "@/models/admin/RepairWorker";
 
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method === "GET") {
     const { id } = req.query;
 
     try {
-      const total = await Total.findById(id);
+      // Fetch all users from the database
+      const worker = await Worker.find({ id });
 
-      res.status(200).json(total);
+      res.status(200).json(worker);
     } catch (error) {
-      console.error("Error fetching users:", error);
+      console.error("Error fetching worker:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   } else {

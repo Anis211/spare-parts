@@ -1,9 +1,15 @@
 import connectDB from "@/lib/mongoose";
 import { OpenAI } from "openai";
+import axios from "axios";
+
 import Chat from "@/models/Chat";
 import User from "@/models/User";
 import PendingOrder from "@/models/PendingOrder";
+import Worker from "@/models/admin/RepairWorker";
+import Calendar from "@/models/Calendar";
 import Alatrade from "@/models/Alatrade";
+import Reservation from "@/models/admin/Reservation";
+
 import { getGrid } from "@/lib/gridfs";
 import { tonEncode } from "@/lib/ton";
 import {
@@ -13,11 +19,14 @@ import {
 import { createLimitedCaller } from "@/lib/limiterBackoff";
 import Semaphore from "@/lib/bulkhead";
 import CircuitBreaker from "@/lib/circuitBreaker";
+
 import { sendMessage } from "../bot-webhooks/telegram-webhook";
 import { findEnrichedParts } from "@/helpers/orderParts";
-import axios from "axios";
-
-connectDB();
+import {
+  toUTCDateOnly,
+  addHoursToTime,
+  checkTimePeriodAvailability,
+} from "@/lib/dateUtils";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -96,6 +105,7 @@ export const config = {
   },
 };
 
+// === Function That Shortens Analogs ===
 function toShortSchema(original, analogs) {
   // original: {name,brand,article}
   const O = original
@@ -123,7 +133,62 @@ function toShortSchema(original, analogs) {
   return { O, A };
 }
 
+// === Parser For Reservation Data ===
+function parseReservationResponse(str) {
+  if (typeof str !== "string") return null;
+  let cleaned = str.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/g, "$1").trim();
+
+  cleaned = cleaned.replace(/\\ /g, "\\\\ ");
+
+  if (!cleaned) return null;
+
+  try {
+    const parsed = JSON.parse(cleaned);
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
+    if (typeof parsed.confirmationMessage !== "string") return null;
+    if (!Array.isArray(parsed.services)) return null;
+
+    for (const service of parsed.services) {
+      if (!service || typeof service !== "object" || Array.isArray(service))
+        return null;
+      if (
+        typeof service.serviceType !== "string" ||
+        typeof service.description !== "string"
+      )
+        return null;
+      if (!Array.isArray(service.parts)) return null;
+
+      for (const part of service.parts) {
+        if (!part || typeof part !== "object" || Array.isArray(part))
+          return null;
+        if (
+          typeof part.id !== "string" ||
+          typeof part.name !== "string" ||
+          typeof part.partNumber !== "string" ||
+          typeof part.quantity !== "number" ||
+          typeof part.unitPrice !== "number"
+        )
+          return null;
+        if (part.quantity <= 0 || part.unitPrice < 0) return null;
+      }
+    }
+
+    return parsed;
+  } catch (e) {
+    console.warn(
+      "Failed to parse reservation response after fixes:",
+      e.message
+    );
+    console.warn("Problematic string snippet:", cleaned.substring(0, 200));
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method !== "POST") {
     return res.status(405).json({
       success: false,
@@ -161,11 +226,13 @@ export default async function handler(req, res) {
 
     let pastMessages = await Chat.find({ "user.id": rest.chatId })
       .sort({ createdAt: -1 })
-      .limit(3);
+      .limit(20);
 
     if (!pastMessages) {
       pastMessages = [];
     }
+
+    const currentDate = new Date().toISOString().split("T")[0];
 
     let messages = [
       {
@@ -193,18 +260,27 @@ Output the part name and brands exactly how they are in the data recieved, do no
 
 order_parts rules:
 Use when the user wants or confirms an order.
-Reply friendly confirmation listing ordered parts and link:
-http://localhost:3000/details/XXX (XXX = orderId)
+Reply friendly confirmation listing ordered parts.
 
 Example:
 Your order is confirmed! 🎉
 1) STELLOX Oil Filter
 2) KS Oil Filter
-Check details: http://localhost:3000/details/123 🚗💨
 
 find_and_send_pictures rules:
 Use when user asks to see or compare a part.
 Return exactly: images: ["url1","url2","url3"]
+
+make_reservation rules:
+Use when user asks for a repair work service reservation.
+Use to continue the reservation process when user gives the time period he/she is comfortable to visit the shop.
+Today's date in Asia/Almaty timezone is ${currentDate}.
+All user requests refer to this timezone.
+When the user wants to book a repair reservation, check the chat history for any recent part orders.
+Look for lines containing [SYSTEM_META: ...] — these contain structured data.
+Extract the 'part_ids' array from it and use those exact strings as the 'repairPartsIds' parameter in 'make_reservation'.
+Example: [SYSTEM_META: order_id="ORD789"] → use ["ORD789"].
+Do NOT guess part IDs. Only use those from SYSTEM_META.
 
 Formatting (critical):
 Plain text only — real line breaks.
@@ -331,6 +407,56 @@ Need help choosing? 🚗💨
             },
             required: ["partData"],
           },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "make_reservation",
+          description:
+            "You need to get the repair work service type that needs to be done to the clients car and the speciality of worker needed among: ['General Maintenance', 'Brake Systems', 'Engine Diagnostics'], depending on what parts he/she bought or the service type client asked for",
+          parameters: {
+            type: "object",
+            properties: {
+              serviceTypes: {
+                type: "array",
+                items: {
+                  type: "string",
+                  description:
+                    "It is the repair work service type that need to be applied to clients car needs according to the parts being ordered before",
+                },
+              },
+              repairPartsIds: {
+                type: "array",
+                items: {
+                  type: "string",
+                  description:
+                    "It is the list of order parts ids that are connected to the serviceType client needs. Take the parts order id from the chat history",
+                },
+              },
+              speciality: {
+                type: "string",
+                description:
+                  "It is the speciality of the repair worker that can do the serviceType work",
+              },
+              date: {
+                type: "string",
+                description:
+                  "It is the specified by the client date when he has free time to visit the shop, if there is not date return 'nothing', else the date should look like this 'year-month-day' for example '2024-05-12'",
+              },
+              time: {
+                type: "string",
+                description:
+                  "It is the time period when the user is comfortable to make reservation, it should look like this '16:00' which is the start time for the repair service. If the time is not defined return 'nothing'",
+              },
+              duration: {
+                type: "number",
+                description:
+                  "It is the approximated duration of the repair work process, depending on the serviceType needed to be done. The lowest duration value can be one hour, the value is counted in hours like '1' or '1.5'",
+              },
+            },
+          },
+          required: ["serviceType", "speciality", "date", "time", "duration"],
         },
       },
     ];
@@ -1012,7 +1138,7 @@ Available parts data: ${resText}`,
           const analogs = Array.from(mergedMap.values());
           chatData = { original, analogs };
 
-          const compact = toShortSchema(original, analogs);
+          const compact = toShortSchema({}, analogs);
           const ton = tonEncode(compact);
 
           const functionResponseForModel = {
@@ -1150,6 +1276,7 @@ Available parts data: ${resText}`,
               article: part.article,
               quantity: part.orderQuantity,
               price: part.partPrice,
+              source: part.sources[0] || "unknown",
             }));
 
             // Update the specific part's items
@@ -1165,6 +1292,10 @@ Available parts data: ${resText}`,
               { $set: { parts: updatedParts } }
             );
           } else {
+            const orderId = Math.floor(
+              10000000000 + Math.random() * 900000
+            ).toString();
+
             await User.findOneAndUpdate(
               {
                 "chatId.id": rest.chatId,
@@ -1172,8 +1303,9 @@ Available parts data: ${resText}`,
               {
                 $push: {
                   parts: {
+                    id: orderId,
                     items: enrichedParts.map((part) => ({
-                      id: Math.floor(
+                      partId: Math.floor(
                         100000 + Math.random() * 900000
                       ).toString(),
                       name: part.partName,
@@ -1193,7 +1325,7 @@ Available parts data: ${resText}`,
 
           const functionResponse = {
             status: "success",
-            message: `Successfully ordered ${enrichedParts.length} part(s)!`,
+            message: `Successfully ordered ${enrichedParts.length} part(s) and OrderId ${orderId}!`,
           };
 
           messages.push(responseMessage);
@@ -1332,8 +1464,6 @@ Available parts data: ${resText}`,
             fallback: 0.9,
           }
         );
-        // bestProduct is either the single most similar product (brand matched) or null
-
         console.log("Found part for pictures:", partNeeded);
 
         try {
@@ -1369,6 +1499,415 @@ Available parts data: ${resText}`,
           });
 
           finalResponse = await llmChat(messages, { model: "gpt-4o" });
+        }
+      } else if (functionName === "make_reservation") {
+        const {
+          serviceTypes,
+          repairPartsIds,
+          speciality,
+          date,
+          time,
+          duration,
+        } = functionArgs;
+
+        if (!serviceTypes || !speciality) {
+          return res.status(500).json("Not all of the arguments are there!");
+        }
+        console.log(
+          `serviceTypes: ${serviceTypes}, repairPartsIds: ${repairPartsIds}, speciality: ${speciality}, date: ${date}, time: ${time}, duration: ${duration}`
+        );
+
+        try {
+          const worker = await Worker.findOne({ speciality: speciality });
+          if (!worker) {
+            // ... handle no worker (your existing code)
+            return; // ✅ Make sure you return!
+          }
+
+          if (date !== "nothing") {
+            const targetDate = toUTCDateOnly(date); // Use the actual `date` from args
+            const calendarDate = await Calendar.findOne({ date: targetDate });
+
+            if (!calendarDate) {
+              // ❗ Calendar entry doesn't exist for this date
+              const errorMsg = `No calendar data available for ${date}.`;
+
+              if (source === "telegram") {
+                await sendMessage(rest.chatId, errorMsg);
+              }
+
+              const functionResponse = {
+                status: "error",
+                message: errorMsg,
+              };
+
+              messages.push(responseMessage);
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                name: functionName,
+                content: JSON.stringify(functionResponse),
+              });
+
+              finalResponse = await llmChat(messages, { model: "gpt-4o" });
+            } else {
+              const workload = calendarDate.workers.find(
+                (repairWorker) => repairWorker.id == worker.id
+              );
+
+              if (time != "nothing") {
+                const endTime = addHoursToTime(time, duration);
+                const isAvailable =
+                  workload.length > 0
+                    ? checkTimePeriodAvailability(workload, time, endTime)
+                    : { available: true };
+
+                if (isAvailable.available) {
+                  const user = await User.findOne({ "chatId.id": rest.chatId });
+                  let repairItems = [];
+
+                  const availablePartsList = [];
+                  for (const id of repairPartsIds) {
+                    const userPart = user.parts.find((p) => p.id == id);
+                    if (!userPart || !userPart.items?.[0]) continue;
+
+                    userPart.items.map((item) => {
+                      availablePartsList.push({
+                        id: item.partId,
+                        name: item.name,
+                        partNumber: item.article,
+                        quantity: item.quantity,
+                        unitPrice: item.price,
+                        purchaseDate: userPart.purchaseDate,
+                        arrivalDate: item.arrivalDate,
+                        status: item.status,
+                      });
+                    });
+                  }
+
+                  const partsDescription =
+                    availablePartsList.length > 0
+                      ? availablePartsList
+                          .map(
+                            (p) =>
+                              `- ID: "${p.id}", Name: "${
+                                p.name
+                              }", Part Number: "${p.partNumber}", Quantity: ${
+                                p.quantity
+                              }, Unit Price: ${p.unitPrice}, Purchase Date: "${
+                                p.purchaseDate.toISOString().split("T")[0]
+                              }", Arrival Date: "${p.arrivalDate}", Status: "${
+                                p.status
+                              }"`
+                          )
+                          .join("\n")
+                      : "No parts selected.";
+
+                  const partsMessages = [
+                    {
+                      role: "user",
+                      content: `You are a reservation assistant. Use ONLY the parts provided below. DO NOT invent, guess, or fabricate any part details.
+
+AVAILABLE PARTS (use these EXACTLY — do not change names, IDs, prices, or quantities):
+${partsDescription}
+
+REQUIRED SERVICE TYPES:
+${serviceTypes.map((s) => `- "${s}"`).join("\n")}
+
+INSTRUCTIONS:
+1. Return a JSON object with "confirmationMessage" and "services".
+2. Each service must have:
+   - "serviceType": use the exact string from the required list above
+   - "description": write a short, generic description for the service
+   - "parts": an array containing ONLY the parts from the AVAILABLE PARTS list
+3. Assign ALL available parts to EVERY service.
+4. NEVER add parts not in the list. NEVER change part IDs, names, prices, or quantities.
+5. Output ONLY valid JSON. No markdown, no extra text.
+
+Example output structure:
+{
+  "confirmationMessage": "Parts assigned successfully.",
+  "services": [
+    {
+      "serviceType": "General Maintenance",
+      "description": "Routine vehicle maintenance.",
+      "parts": [
+        { "id": "10000074548", "name": "Фильтр масляный", "partNumber": "1457429269", "quantity": 2, "unitPrice": 4642, "purchaseDate": "2024-06-15", arrivalDate: "2024-06-20", status: "ordered" },
+      ]
+    }
+  ]
+}`,
+                    },
+                  ];
+
+                  const rawResponse = await llmChat(partsMessages, {
+                    model: "gpt-4o-mini",
+                  });
+
+                  const content =
+                    typeof rawResponse === "string"
+                      ? rawResponse
+                      : rawResponse?.choices?.[0]?.message?.content;
+                  console.log("Raw Services Content: ", content);
+
+                  const rawServices = parseReservationResponse(content);
+                  console.log("Parsed Raw Services: ", rawServices);
+                  console.log(
+                    "Parsed Raw Service Items: ",
+                    rawServices.services[0].parts
+                  );
+
+                  for (const service of rawServices.services) {
+                    repairItems[service.serviceType] = {
+                      description: service.description,
+                      parts: service.parts.map((part) => ({
+                        id: part.id,
+                        name: part.name,
+                        partNumber: part.partNumber,
+                        quantity: part.quantity,
+                        unitPrice: part.unitPrice,
+                        totalPrice: part.quantity * part.unitPrice,
+                        purchaseDate: part.purchaseDate,
+                        arrivalDate:
+                          part.arrivalDate != "null" ? part.arrivalDate : null,
+                        status: part.status,
+                      })),
+                    };
+                  }
+
+                  const repairWorkIds = serviceTypes.map(() =>
+                    Math.floor(1000000000 + Math.random() * 900000).toString()
+                  );
+
+                  const reservationId = Math.floor(
+                    1000000000 + Math.random() * 900000
+                  ).toString();
+
+                  const newReservation = new Reservation({
+                    id: reservationId,
+                    date: targetDate,
+                    startTime: time,
+                    client: {
+                      id: user.chatId.id,
+                      phone: user.phone,
+                      name: user.name,
+                      email: user.email,
+                      car: {
+                        vin: user.car.vin,
+                        make: user.car.make,
+                        model: user.car.model,
+                        year: user.car.year,
+                      },
+                    },
+                    repairWorks: serviceTypes.map((serviceType, index) => {
+                      console.log("item: ", {
+                        id: repairWorkIds[index],
+                        serviceType: serviceType,
+                        description: repairItems[serviceType].description,
+                        cost: 0,
+                        repairItems: repairItems[serviceType].parts,
+                      });
+
+                      return {
+                        id: repairWorkIds[index],
+                        serviceType: serviceType,
+                        description: repairItems[serviceType].description,
+                        cost: 0,
+                        assignedWorker: {
+                          id: worker.id,
+                          name: worker.name,
+                          phone: worker.phone,
+                        },
+                        repairItems: repairItems[serviceType].parts,
+                      };
+                    }),
+                  });
+                  await newReservation.save();
+                  console.log("Created the Reservation Sucessfully!");
+
+                  const newUserRepairWorks = serviceTypes.map(
+                    (serviceType, index) => ({
+                      id: repairWorkIds[index],
+                      description:
+                        repairItems[serviceType]?.description ||
+                        "No description",
+                      cost: 0,
+                      arrivalDate: targetDate,
+                      assignedWorker: {
+                        id: worker.id,
+                        name: worker.name,
+                        phone: worker.phone,
+                      },
+                      repairItems: (repairItems[serviceType]?.parts || []).map(
+                        (part) => ({
+                          partsId: part.id,
+                          items: [part.name],
+                        })
+                      ),
+                    })
+                  );
+
+                  await User.findOneAndUpdate(
+                    { "chatId.id": rest.chatId },
+                    { $push: { repairWorks: { $each: newUserRepairWorks } } },
+                    { new: true }
+                  );
+                  console.log("Added Repair Works to User Succesfully!");
+
+                  // Ensure targetDate is a string in YYYY-MM-DD format
+                  let dateStr;
+                  if (targetDate instanceof Date) {
+                    dateStr = targetDate.toISOString().split("T")[0];
+                  } else if (typeof targetDate === "string") {
+                    // If it's already a string, assume it's YYYY-MM-DD
+                    dateStr = targetDate;
+                  } else {
+                    throw new Error("Invalid targetDate format");
+                  }
+
+                  // Normalize time (as before)
+                  const normalizeTime = (t) => {
+                    if (!t || typeof t !== "string") return null;
+                    const [h, m = "00"] = t.split(":");
+                    return `${String(parseInt(h, 10) || 0).padStart(
+                      2,
+                      "0"
+                    )}:${String(parseInt(m, 10) || 0).padStart(2, "0")}`;
+                  };
+
+                  const safeTime = normalizeTime(time);
+                  const safeEndTime = normalizeTime(endTime);
+
+                  if (!safeTime || !safeEndTime) {
+                    throw new Error("Invalid time format");
+                  }
+
+                  // Create valid Date objects
+                  const from = new Date(`${dateStr}T${safeTime}:00`);
+                  const to = new Date(`${dateStr}T${safeEndTime}:00`);
+
+                  // Validate
+                  if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+                    throw new Error(
+                      `Invalid datetime: ${dateStr} ${safeTime} - ${safeEndTime}`
+                    );
+                  }
+
+                  // Now use in update
+                  await Calendar.findOneAndUpdate(
+                    { date: toUTCDateOnly(date) },
+                    {
+                      $push: {
+                        "workers.$[worker].workload": {
+                          time_period: { from, to },
+                          reservation: { id: reservationId },
+                        },
+                      },
+                    },
+                    { arrayFilters: [{ "worker.id": worker.id }], new: true }
+                  );
+                  console.log("Added the Reservation Time to the Calendar!");
+
+                  const newWorkerRepairWorks = serviceTypes.map(
+                    (serviceType, index) => ({
+                      id: repairWorkIds[index],
+                      title: serviceType,
+                      client: {
+                        id: user.chatId.id,
+                      },
+                      laborCost: 0,
+                    })
+                  );
+
+                  await Worker.findOneAndUpdate(
+                    {
+                      id: worker.id,
+                    },
+                    {
+                      $push: {
+                        currentMonthWorks: {
+                          $each: newWorkerRepairWorks,
+                        },
+                      },
+                    }
+                  );
+                  console.log(
+                    "Added the Reservation Details to the Repair Workers Dataset!"
+                  );
+
+                  const functionResponse = {
+                    status: "success",
+                    message: `Successfully created a reservation for ${targetDate} on ${time}!`,
+                    serviceTypes: serviceTypes,
+                    worker,
+                  };
+
+                  messages.push(responseMessage);
+                  messages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    name: functionName,
+                    content: JSON.stringify(functionResponse),
+                  });
+
+                  finalResponse = await llmChat(messages, { model: "gpt-4o" });
+                } else {
+                  const functionResponse = {
+                    status: "fail",
+                    message: `The Reason of the Fail: ${isAvailable.reason}`,
+                    workload,
+                  };
+
+                  messages.push(responseMessage);
+                  messages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    name: functionName,
+                    content: JSON.stringify(functionResponse),
+                  });
+
+                  finalResponse = await llmChat(messages, { model: "gpt-4o" });
+                }
+              } else {
+                const functionResponse = {
+                  status: "success",
+                  message: `Successfully found workload for ${worker.speciality} on ${date}!`,
+                  worker,
+                  workload: workload || null,
+                };
+
+                messages.push({
+                  role: "user",
+                  content:
+                    "INSTRUCTION: Summarize the workload result in a friendly, customer-friendly way. Do not mention 'workload', 'worker ID', or technical terms. Just confirm availability for the requested date and service. Give the List of Available time periods of the specified worker.",
+                });
+                messages.push(responseMessage);
+                messages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  name: functionName,
+                  content: JSON.stringify(functionResponse),
+                });
+
+                finalResponse = await llmChat(messages, { model: "gpt-4o" });
+              }
+            }
+          }
+
+          // ✅ Only now extract AI response
+          if (!finalResponse) {
+            throw new Error("LLM call did not return a response");
+          }
+
+          // ... rest of your code (save chat, etc.)
+        } catch (err) {
+          console.error("Reservation error:", err);
+
+          // 🚨 Always send a valid JSON response
+          return res.status(500).json({
+            error: "Error While Making Reservation",
+            details: err.message,
+          });
         }
       } else {
         // Unrecognized tool

@@ -1,10 +1,9 @@
 import connectDB from "@/lib/mongoose";
 import User from "@/models/User";
 
-// Connect to MongoDB when the API route is accessed
-connectDB();
-
 export default async function handler(req, res) {
+  await connectDB();
+
   if (req.method === "GET") {
     const { countl, countr } = req.query;
 

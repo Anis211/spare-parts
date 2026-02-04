@@ -48,58 +48,16 @@ const features = [
 
 const App = () => {
   const handleClick = async () => {
-    const proxyAutotradeAuthUrl = `/api/py/autotrade_auth`;
-    const proxyAutotradeUrl = `/api/py/autotrade`;
-    const partNumber = "CRG-32";
-
     try {
-      // -----------------------------------------
-      // 1. Fetch Auth Data
-      // -----------------------------------------
-      console.log("Step 1: Fetching Auth...");
-      const authResponse = await fetch(proxyAutotradeAuthUrl, {
+      const res = await fetch("/api/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
+      const data = await res.json();
 
-      const authData = await authResponse.json();
-      console.log("Auth Data Received:", authData);
-
-      // Validate we have the cookie jar
-      const jar = authData.cookie_jar || authData.auth_data?.cookie_jar;
-      if (!jar) {
-        console.error("Error: No cookie_jar found in auth response", authData);
-        return;
-      }
-
-      // -----------------------------------------
-      // 2. Use Auth Data to Fetch Stocks
-      // -----------------------------------------
-      console.log("Step 2: Fetching Stocks...");
-
-      const payload = {
-        q: partNumber,
-        auth_key: ":auth_key",
-        sessid: jar.sessid,
-        ddg8: jar.__ddg8_, // Mapping __ddg8_ from jar to ddg8 arg
-        ddg9: jar.__ddg9_,
-        ddg10: jar.__ddg10_,
-        ddg1: jar.__ddg1_,
-        lang: jar.lang,
-        series: jar.series,
-        logindt: jar.logindt,
-      };
-
-      const stockResponse = await fetch(proxyAutotradeUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const stockData = await stockResponse.json();
-      console.log("Final Stock Data:", stockData);
+      console.log("orders: ", data.orders);
     } catch (error) {
-      console.error("Autotrade Pipeline Error:", error);
+      console.error("Error:", error);
     }
   };
 

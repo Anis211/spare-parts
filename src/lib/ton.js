@@ -1,11 +1,13 @@
 const isPrim = (v) =>
   v === null || ["string", "number", "boolean"].includes(typeof v);
 const keyOf = (v) => JSON.stringify(v);
+
 function sha1(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+
 function buildDict(obj) {
   const d = [],
     idx = new Map();
@@ -32,6 +34,7 @@ function buildDict(obj) {
   walk(obj);
   return { d, idx };
 }
+
 function encBody(v, idx) {
   if (isPrim(v)) return { $: idx.get(keyOf(v)) };
   if (Array.isArray(v)) return v.map((x) => encBody(x, idx));
@@ -42,6 +45,7 @@ function encBody(v, idx) {
   }
   return v;
 }
+
 export function tonEncode(input) {
   const { d, idx } = buildDict(input);
   const b = encBody(input, idx);
