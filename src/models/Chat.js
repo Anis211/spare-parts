@@ -42,6 +42,12 @@ const chatSchema = new mongoose.Schema(
             sources: [String],
           },
         ],
+        pagination: {
+          total: { type: Number, default: 0 },
+          batchSize: { type: Number, default: 7 },
+          currentIndex: { type: Number, default: 0 },
+          hasMore: { type: Boolean, default: false },
+        },
       },
     ],
     chat: [

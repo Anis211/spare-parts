@@ -97,7 +97,7 @@ async function processMessageInBackground(message) {
   try {
     // 🔁 Your existing logic goes here:
     if (message.contact) {
-      // ... handle contact/order creation
+      // ... [Your existing contact/order creation logic - unchanged] ...
       const phoneNumber = message.contact.phone_number;
       console.log("Received phone number:", phoneNumber);
 
@@ -244,6 +244,37 @@ async function processMessageInBackground(message) {
       const textContent = message.text || message.caption || "";
       if (textContent) userMessages.push(textContent);
 
+      // 🔥 NEW: Detect pagination/"show more" requests
+      const isShowMoreRequest = textContent
+        .toLowerCase()
+        .match(
+          /show more|next|еще|показать|больше|далее|more options|продолжить/,
+        );
+
+      // 🔥 NEW: Get last searched part number from chat history if this is a "show more" request
+      let lastPartNumber = null;
+      if (isShowMoreRequest) {
+        const chatDoc = await Chat.findOne({ "user.id": chatId }).lean();
+        if (chatDoc?.chatData?.length > 0) {
+          // Get the most recent search result
+          const lastSearch = chatDoc.chatData[chatDoc.chatData.length - 1];
+          lastPartNumber = lastSearch.original?.article;
+          console.log(`🔄 Pagination request for part: ${lastPartNumber}`);
+        }
+      }
+
+      // 🔥 Prepare functionArgs for pagination or normal search
+      const functionArgs = isShowMoreRequest
+        ? {
+            showMore: true,
+            partNumber: lastPartNumber,
+            partName1: textContent, // Keep original message for context
+          }
+        : {
+            partName1: textContent,
+            vin: extractVinFromChat([message]) || "",
+          };
+
       const apiResponse = await fetch(
         `${process.env.NEXT_PUBLIC_BASE_URL}/api/chat/user-question`,
         {
@@ -254,6 +285,7 @@ async function processMessageInBackground(message) {
             userImages,
             source: "telegram",
             chatId,
+            functionArgs, // 🔥 Pass functionArgs for pagination detection
           }),
         },
       );

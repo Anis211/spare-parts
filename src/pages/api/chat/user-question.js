@@ -533,6 +533,151 @@ Need help choosing? 🚗💨
         const { partName1, vin } = functionArgs;
         let partName = partName1;
 
+        // ── Handle pagination/"show more" requests ────────────────────────────────────
+        const isPaginationRequest =
+          functionArgs.showMore === true ||
+          functionArgs.partName1
+            ?.toLowerCase()
+            .match(/more|next|еще|показать|больше|далее/) ||
+          functionArgs.continue === true;
+
+        if (isPaginationRequest) {
+          console.log(
+            `🔄 Pagination request: chatId=${rest.chatId}, part=${functionArgs.partNumber || partNumber}`,
+          );
+
+          try {
+            // Find the chat document
+            const chat = await Chat.findOne({
+              "user.source": source,
+              "user.id": rest.chatId || req.user?.id,
+            }).lean();
+
+            if (!chat) {
+              throw new Error(
+                "No chat history found. Please search for a part first.",
+              );
+            }
+
+            // Find the relevant search result in chatData
+            const searchResult = chat.chatData.find(
+              (cd) =>
+                cd.original?.article ===
+                (functionArgs.partNumber || partNumber),
+            );
+
+            if (!searchResult || !searchResult.analogs?.length) {
+              throw new Error(
+                "No previous search results found for this part.",
+              );
+            }
+
+            // Get pagination state (fallback if not stored)
+            const pagination = searchResult.pagination || {
+              total: searchResult.analogs.length,
+              batchSize: 7,
+              currentIndex: 0,
+              hasMore: searchResult.analogs.length > 7,
+            };
+
+            // Calculate next batch
+            const startIndex = pagination.currentIndex || 0;
+            const endIndex = Math.min(
+              startIndex + pagination.batchSize,
+              pagination.total,
+            );
+            const nextBatch = searchResult.analogs.slice(startIndex, endIndex);
+            const newCurrentIndex = endIndex;
+            const remainingAfter = pagination.total - newCurrentIndex;
+
+            // 🔥 Update MongoDB with new pagination state
+            await Chat.findOneAndUpdate(
+              {
+                "user.source": source,
+                "user.id": rest.chatId || req.user?.id,
+                "chatData.original.article":
+                  functionArgs.partNumber || partNumber,
+              },
+              {
+                $set: {
+                  "chatData.$.pagination": {
+                    total: pagination.total,
+                    batchSize: pagination.batchSize,
+                    currentIndex: newCurrentIndex,
+                    hasMore: remainingAfter > 0,
+                  },
+                  updatedAt: new Date(),
+                },
+              },
+            );
+
+            // Prepare response for LLM (next batch only)
+            const compact = toShortSchema({}, nextBatch);
+            const ton = tonEncode(compact);
+
+            const paginationResponse = {
+              fmt: "TONv1",
+              ton,
+              partNumber: searchResult.original?.article,
+              pagination: {
+                batch: `${startIndex + 1}-${endIndex}`,
+                total: pagination.total,
+                remaining: remainingAfter,
+                hasMore: remainingAfter > 0,
+                nextPrompt:
+                  remainingAfter > 0
+                    ? "Type 'show more' again for additional options"
+                    : "That's all available options! 🎉",
+              },
+            };
+
+            // Build prompt for "more results"
+            const morePrompt = `You are an auto parts assistant. The user asked to see MORE options. 
+
+Display these ${nextBatch.length} additional analogs (items ${startIndex + 1}-${endIndex} of ${pagination.total} total):
+
+${nextBatch
+  .map(
+    (a, i) =>
+      `${startIndex + i + 1}) ${a.brand || "Unknown"}
+  🔧 ${a.name || "No description"}
+  💰 ${a.stocks?.[0]?.partPrice || "N/A"} ${a.stocks?.[0]?.currency || ""}
+  📍 In ${a.stocks?.[0]?.place || "Unknown"} — available ${a.stocks?.[0]?.delivery?.start || "soon"}
+`,
+  )
+  .join("\n\n")}
+
+${remainingAfter > 0 ? `\n\n💡 ${remainingAfter} more options available. Type "show more" to continue.` : "\n\n✅ That's all available options for this part!"}
+`;
+
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall?.id || `pagination-${Date.now()}`,
+              name: "show_more_analogs",
+              content: JSON.stringify(paginationResponse),
+            });
+
+            finalResponse = await llmChat(
+              [...messages, { role: "user", content: morePrompt }],
+              {
+                model: "gpt-4o",
+                max_tokens: 1500,
+                temperature: 0,
+              },
+            );
+
+            // ✅ Exit early - pagination response sent
+            return res.status(200).json({
+              success: true,
+              response: finalResponse.choices[0].message.content,
+              matchedPartIds,
+            });
+          } catch (err) {
+            console.error("❌ Pagination error:", err.message);
+            // Fallback: proceed to normal scrape flow if pagination fails
+          }
+        }
+
         const baseUrl =
           process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
 
@@ -1568,14 +1713,40 @@ Need help choosing? 🚗💨
           );
 
           // ── Build final response ───────────────────────────────────────────────────
-          chatData = { original, analogs };
-          const compact = toShortSchema({}, analogs);
+          chatData = {
+            original,
+            analogs,
+            pagination: {
+              total: analogs.length,
+              batchSize: 7,
+              currentIndex: 0,
+              hasMore: analogs.length > 7,
+            },
+          };
+          // ── Build paginated response (first 7 only) ───────────────────────────────────
+          const BATCH_SIZE = 7;
+          const firstBatch = analogs.slice(0, BATCH_SIZE);
+          const remainingCount = analogs.length - BATCH_SIZE;
+
+          // Prepare compact data for LLM (only first 7)
+          const compact = toShortSchema({}, firstBatch);
           const ton = tonEncode(compact);
 
           const functionResponseForModel = {
             fmt: "TONv1",
             ton,
             partNumber,
+            // 🔥 Pagination metadata for frontend/LLM
+            pagination: {
+              total: analogs.length,
+              displayed: firstBatch.length,
+              remaining: remainingCount,
+              hasMore: remainingCount > 0,
+              nextPrompt:
+                remainingCount > 0
+                  ? "Type 'show more' to see remaining options"
+                  : "",
+            },
           };
 
           messages.push(responseMessage);
@@ -1586,11 +1757,30 @@ Need help choosing? 🚗💨
             content: JSON.stringify(functionResponseForModel),
           });
 
-          finalResponse = await llmChat(messages, {
-            model: "gpt-4o",
-            max_tokens: 800,
-            temperature: 0,
-          });
+          // 🔥 Updated prompt to mention pagination
+          const initialPrompt = `You are an auto parts assistant. Format these ${firstBatch.length} analogs (out of ${analogs.length} total found) for the user. 
+
+IMPORTANT: 
+- Show only these ${firstBatch.length} results now
+- Mention that ${remainingCount > 0 ? `${remainingCount} more options are available` : "these are all available options"}
+- Tell the user to type "show more" or "next" to see additional results (if any remain)
+- Format each as:
+
+1) BRAND
+  🔧 DETAILED_NAME  
+  💰 PRICE CURRENCY
+  📍 In CITY — available DATE
+
+List these ${firstBatch.length} items:`;
+
+          finalResponse = await llmChat(
+            [...messages, { role: "user", content: initialPrompt }],
+            {
+              model: "gpt-4o",
+              max_tokens: 1500,
+              temperature: 0,
+            },
+          );
         } catch (scrapeError) {
           console.error("Scraping error:", scrapeError);
 
