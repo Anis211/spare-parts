@@ -48,12 +48,11 @@ const OrderDetails = ({ setActiveTab, selectedSalesTab }) => {
         if (!user) {
           console.warn(
             "No user found for phone:",
-            selectedSalesTab.clientPhone
+            selectedSalesTab.clientPhone,
           );
           return;
         }
 
-        // ✅ Safely process parts history
         let hisParts = [];
         if (Array.isArray(user.parts)) {
           for (const order of user.parts) {
@@ -63,7 +62,6 @@ const OrderDetails = ({ setActiveTab, selectedSalesTab }) => {
           }
         }
 
-        // ✅ Safely process repair history
         let hisRepairs = [];
         if (Array.isArray(user.repairWorks)) {
           hisRepairs = user.repairWorks.map((repairWork) => {
@@ -90,7 +88,6 @@ const OrderDetails = ({ setActiveTab, selectedSalesTab }) => {
           });
         }
 
-        // ✅ Process current order
         let curParts = [];
         let curRepairs = [];
 
@@ -100,7 +97,7 @@ const OrderDetails = ({ setActiveTab, selectedSalesTab }) => {
         if (Array.isArray(selectedSalesTab.repairWorks)) {
           for (const repairWork of selectedSalesTab.repairWorks) {
             const userRepairWorkData = user.repairWorks?.find(
-              (userRepairWork) => userRepairWork?.id === repairWork?.id
+              (userRepairWork) => userRepairWork?.id === repairWork?.id,
             );
             totalCost += repairWork.laborCost || 0;
 
@@ -154,19 +151,17 @@ const OrderDetails = ({ setActiveTab, selectedSalesTab }) => {
           }
         }
 
-        // ✅ Filter out current items from history
         const filteredHisParts = hisParts.filter(
-          (hisPart) => hisPart?.partId && !currentPartIds.has(hisPart.partId)
+          (hisPart) => hisPart?.partId && !currentPartIds.has(hisPart.partId),
         );
 
         const filteredHisRepairs = hisRepairs.filter(
           (hisRepair) =>
             !selectedSalesTab.repairWorks?.some(
-              (curRepair) => curRepair?.id === hisRepair?.id
-            )
+              (curRepair) => curRepair?.id === hisRepair?.id,
+            ),
         );
 
-        // ✅ Update states
         setOrderData({
           orderId: selectedSalesTab.id || "",
           vin: selectedSalesTab.vin || "",

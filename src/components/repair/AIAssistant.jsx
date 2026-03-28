@@ -10,56 +10,6 @@ import { Progress } from "@/components/repair/ui/progress";
 import { VoiceConfirmationPanel } from "@/components/repair/chat/VoiceConfirmationPanel";
 import { toast } from "sonner";
 
-// Mock client data for next appointment
-const nextClientData = {
-  id: 2,
-  clientName: "Sarah Williams",
-  phone: "+1 (555) 987-6543",
-  email: "sarah.williams@email.com",
-  carModel: "BMW 330i",
-  carYear: "2022",
-  licensePlate: "XYZ-5678",
-  vin: "WBA8E1C55JA765432",
-  mileage: "28,450 mi",
-  date: "2026-01-05",
-  time: "11:30",
-  serviceType: "Oil Change",
-  notes: "Regular maintenance. Use synthetic oil. Customer prefers to wait.",
-  status: "scheduled",
-  previousRepairs: [
-    {
-      date: "2025-10-12",
-      serviceType: "Brake Inspection",
-      mileage: "25,100 mi",
-      workerName: "Mike T.",
-    },
-    {
-      date: "2025-07-08",
-      serviceType: "Tire Rotation",
-      mileage: "21,800 mi",
-      workerName: "John D.",
-    },
-    {
-      date: "2025-03-15",
-      serviceType: "Oil Change",
-      mileage: "18,200 mi",
-      workerName: "Mike T.",
-    },
-  ],
-  workerNotes: [
-    {
-      workerName: "Mike T.",
-      note: "Great customer, always on time. Vehicle well-maintained.",
-      date: "2025-10-12",
-    },
-    {
-      workerName: "John D.",
-      note: "Mentioned slight vibration at highway speeds - check alignment next visit.",
-      date: "2025-07-08",
-    },
-  ],
-};
-
 export default function AIAssistant({ messages, setMessages }) {
   const [isListening, setIsListening] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
@@ -71,7 +21,6 @@ export default function AIAssistant({ messages, setMessages }) {
   const [activeRepair, setActiveRepair] = useState(null);
   const messagesEndRef = useRef(null);
 
-  // Voice recording refs
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
@@ -92,6 +41,21 @@ export default function AIAssistant({ messages, setMessages }) {
       }
     };
   }, []);
+
+  // Helper to sanitize text for DB schema compliance
+  const sanitizeText = (text) => {
+    if (!text || typeof text !== "string") return "Empty message";
+
+    return (
+      text
+        .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // Remove control chars
+        .replace(/[\u200B-\u200D\uFEFF]/g, "") // Remove zero-width chars
+        .replace(/\s+/g, " ") // Collapse multiple spaces
+        .trim()
+        .replace(/[^\x20-\x7E\u0400-\u04FF\u00A0-\u00FF.,!?;:'"()\-]/g, "") // Allow: Latin, Cyrillic, basic punctuation
+        .trim() || "Empty message"
+    );
+  };
 
   const startRecording = useCallback(async () => {
     try {
@@ -122,7 +86,6 @@ export default function AIAssistant({ messages, setMessages }) {
         });
         const audioUrl = URL.createObjectURL(audioBlob);
 
-        // Cleanup stream
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
@@ -132,10 +95,8 @@ export default function AIAssistant({ messages, setMessages }) {
         formData.append("audio", audioBlob, "recording.webm");
         formData.append("model", "whisper-1");
 
-        // ✅ CORRECT: No headers - browser sets multipart automatically
         const res = await fetch("/api/chat/transcribe", {
           method: "POST",
-          // ❌ REMOVE THIS: headers: { "Content-Type": "application/json" },
           body: formData,
         });
 
@@ -181,10 +142,13 @@ export default function AIAssistant({ messages, setMessages }) {
   const handleVoiceConfirm = async () => {
     if (!voiceConfirmation) return;
 
+    const cleanTranscription = sanitizeText(voiceConfirmation.transcribedText);
+
+    const timestamp = Date.now();
     const transcribedMessage = {
-      id: messages.length + 1,
+      id: `user-${timestamp}`,
       role: "user",
-      content: voiceConfirmation.transcribedText,
+      content: cleanTranscription,
       time: new Date().toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
@@ -196,36 +160,60 @@ export default function AIAssistant({ messages, setMessages }) {
     setVoiceConfirmation(null);
     setIsTyping(true);
 
-    const res = await fetch("/api/chat/worker_question", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userMessages: [voiceConfirmation.transcribedText],
-        source: "website",
-        id: 3,
-      }),
-    });
-    const data = await res.json();
-
-    if (data.success) {
-      const newAssistantMessage = {
-        id: messages.length + 2,
-        role: "assistant",
-        content: data.answer,
-        time: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
+    try {
+      const res = await fetch("/api/chat/worker_question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessages: [cleanTranscription],
+          source: "website",
+          id: 3,
         }),
-        isRepairSession: !!activeRepair,
-      };
+      });
+      const data = await res.json();
 
-      setMessages((prev) => [...prev, newAssistantMessage]);
-    } else {
+      setIsTyping(false);
+
+      if (data.success) {
+        const cleanResponse = sanitizeText(data.response);
+
+        const assistantMessage = {
+          id: `assistant-${timestamp}`,
+          role: "assistant",
+          content: cleanResponse,
+          time: new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+          clientData: data.isNextRepair ? data.clientData : null,
+          isRepairSession: !!activeRepair,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else {
+        const errorMessage = {
+          id: `error-${timestamp}`,
+          role: "assistant",
+          content:
+            "❌ Sorry, there was an error processing your request. Please try again.",
+          time: new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+          isRepairSession: !!activeRepair,
+        };
+
+        setMessages((prev) => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error("Voice confirm error:", error);
+      setIsTyping(false);
+
       const errorMessage = {
-        id: messages.length + 2,
+        id: `error-${timestamp}`,
         role: "assistant",
         content:
-          "❌ Sorry, there was an error processing your request. Please try again.",
+          "❌ Network error. Please check your connection and try again.",
         time: new Date().toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
@@ -420,8 +408,9 @@ export default function AIAssistant({ messages, setMessages }) {
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
 
+    const timestamp = Date.now();
     const newUserMessage = {
-      id: messages.length + 1,
+      id: `user-${timestamp}`,
       role: "user",
       content: inputText,
       time: new Date().toLocaleTimeString("en-US", {
@@ -432,23 +421,22 @@ export default function AIAssistant({ messages, setMessages }) {
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
-    const userText = inputText;
-
     setInputText("");
     setIsTyping(true);
 
-    const res = await fetch("/api/chat/worker_question", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userMessages: [userText],
-        source: "website",
-        id: 3,
-      }),
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch("/api/chat/worker_question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessages: [inputText],
+          source: "website",
+          id: 3,
+        }),
+      });
+      const data = await res.json();
 
-    /* const partsRequested = isPartsRequest(userText);
+      /* const partsRequested = isPartsRequest(userText);
     setTimeout(() => {
       if (partsRequested) {
         const parts = generatePartsFromRequest(userText);
@@ -498,25 +486,61 @@ export default function AIAssistant({ messages, setMessages }) {
       setIsTyping(false);
     }, 1500); */
 
-    if (data.success) {
-      const newAssistantMessage = {
-        id: messages.length + 2,
-        role: "assistant",
-        content: data.answer,
-        time: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-        isRepairSession: !!activeRepair,
-      };
+      setIsTyping(false);
 
-      setMessages((prev) => [...prev, newAssistantMessage]);
-    } else {
+      if (data.success) {
+        let assistantMessage;
+
+        if (data.clientData != null) {
+          assistantMessage = {
+            id: `assistant-${timestamp}`,
+            role: "assistant",
+            content: data.response,
+            time: new Date().toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+            }),
+            clientData: data.clientData || null,
+            isRepairSession: !!activeRepair,
+          };
+        } else {
+          assistantMessage = {
+            id: `assistant-${timestamp}`,
+            role: "assistant",
+            content: data.response,
+            time: new Date().toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+            }),
+            isRepairSession: !!activeRepair,
+          };
+        }
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else {
+        const errorMessage = {
+          id: `error-${timestamp}`,
+          role: "assistant",
+          content:
+            "❌ Sorry, there was an error processing your request. Please try again.",
+          time: new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+          isRepairSession: !!activeRepair,
+        };
+
+        setMessages((prev) => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error("Send message error:", error);
+      setIsTyping(false);
+
       const errorMessage = {
-        id: messages.length + 2,
+        id: `error-${timestamp}`,
         role: "assistant",
         content:
-          "❌ Sorry, there was an error processing your request. Please try again.",
+          "❌ Network error. Please check your connection and try again.",
         time: new Date().toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
@@ -597,7 +621,6 @@ export default function AIAssistant({ messages, setMessages }) {
                 {message.clientData && (
                   <ClientInfoPanel
                     client={message.clientData}
-                    onCallCustomer={() => console.log("Calling customer...")}
                     onStartRepair={() => handleStartRepair(message.clientData)}
                   />
                 )}

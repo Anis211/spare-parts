@@ -41,41 +41,41 @@ const workerSchema = new mongoose.Schema(
     ],
     chat: {
       chatData: {
-        nextClientData: {
-          id: { type: String, required: true, unique: true },
-          clientName: { type: String, required: true },
-          phone: { type: String, required: true },
-          email: { type: String, required: true },
-          carModel: { type: String, required: true },
-          carYear: { type: String, required: true },
-          licensePlate: { type: String, required: true },
-          vin: { type: String, required: true },
-          mileage: { type: String, required: true },
-          date: { type: String, required: true },
-          time: { type: String, required: true },
-          serviceType: { type: String, required: true },
-          notes: { type: String, default: "" },
-          status: {
-            type: String,
-            enum: ["scheduled", "in-progress", "completed"],
-            default: "scheduled",
+        nextClientData: [
+          {
+            id: { type: String, required: true, unique: true },
+            clientName: { type: String, required: true },
+            carModel: { type: String, required: true },
+            carYear: { type: String, required: true },
+            licensePlate: { type: String, required: true },
+            vin: { type: String, required: true },
+            mileage: { type: String, required: true },
+            date: { type: String, required: true },
+            time: { type: String, required: true },
+            serviceType: { type: String, required: true },
+            notes: { type: String, default: "" },
+            status: {
+              type: String,
+              enum: ["scheduled", "in-progress", "completed"],
+              default: "scheduled",
+            },
+            previousRepairs: [
+              {
+                date: { type: String, required: true },
+                serviceType: { type: String, required: true },
+                mileage: { type: Number, required: true },
+                workerName: { type: String, required: true },
+              },
+            ],
+            workerNotes: [
+              {
+                workerName: { type: String, required: true },
+                note: { type: String, required: true },
+                date: { type: String, required: true },
+              },
+            ],
           },
-          previousRepairs: [
-            {
-              date: { type: String, required: true },
-              serviceType: { type: String, required: true },
-              mileage: { type: Number, required: true },
-              workerName: { type: String, required: true },
-            },
-          ],
-          workerNotes: [
-            {
-              workerName: { type: String, required: true },
-              note: { type: String, required: true },
-              date: { type: String, required: true },
-            },
-          ],
-        },
+        ],
       },
       messages: [
         {
@@ -98,13 +98,14 @@ const workerSchema = new mongoose.Schema(
               enum: ["user", "assistant", "system"],
               required: true,
             },
+            clientId: { type: String, default: null },
             createdAt: { type: Date, default: Date.now },
           },
         },
       ],
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Worker = mongoose.models.Worker || mongoose.model("Worker", workerSchema);

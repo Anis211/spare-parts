@@ -30,6 +30,7 @@
     "date-fns": "^4.1.0",
     "formidable": "^3.5.4",
     "fs": "^0.0.1-security",
+    "ioredis": "^5.10.1",
     "lucide-react": "^0.488.0",
     "mongoose": "^8.13.2",
     "motion": "^12.6.2",

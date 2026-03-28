@@ -5,6 +5,7 @@ import Chat from "@/models/Chat";
 import PendingOrder from "@/models/PendingOrder";
 import connectDB from "@/lib/mongoose";
 import { findEnrichedParts } from "@/helpers/orderParts";
+import { isMessageProcessed, markMessageProcessed } from "@/lib/redis";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -28,7 +29,6 @@ export async function sendMessage(chatId, text) {
   }
 
   try {
-    // ✅ Fixed URL: no extra space
     await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text,
@@ -41,34 +41,75 @@ export async function sendMessage(chatId, text) {
 export default async function handler(req, res) {
   await connectDB();
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  if (req.method === "POST" || req.method === "PUT") {
+    const { message } = req.body;
+
+    if (!message || !message.chat?.id) {
+      return res.status(200).json({ status: "ignored" });
+    }
+
+    const chatId = message.chat.id;
+    const messageId = message.message_id;
+
+    // ✅ Check Redis for duplicate
+    try {
+      const alreadyProcessed = await isMessageProcessed(chatId, messageId);
+      if (alreadyProcessed) {
+        console.log(`[SKIP] Duplicate message_id: ${messageId} (Redis)`);
+        return res.status(200).json({ status: "ignored" });
+      }
+    } catch (err) {
+      console.error("Redis check failed, proceeding anyway:", err);
+      // Fail-open: process the message if Redis is unavailable
+    }
+
+    // ✅ Skip bot messages
+    if (message.from?.is_bot) {
+      console.log(`[SKIP] Message from bot: ${message.from.username}`);
+      return res.status(200).json({ status: "ignored" });
+    }
+
+    // ✅ Respond to Telegram IMMEDIATELY (prevent retries)
+    res.status(200).json({ status: "accepted" });
+
+    // ✅ Mark as processed in Redis (fire-and-forget, don't await)
+    markMessageProcessed(chatId, messageId).catch((err) => {
+      console.error("Failed to mark message as processed in Redis:", err);
+    });
+
+    // ✅ Process message in background
+    processMessageInBackground(message).catch((err) => {
+      console.error("Background processing failed:", err);
+    });
+
+    return; // Important: don't continue with synchronous logic
   }
 
-  const { message } = req.body;
+  return res.status(405).json({ error: "Method not allowed" });
+}
 
-  if (!message || !message.chat?.id) {
-    return res.status(200).json({ status: "ignored" });
-  }
+// --- Background processing function ---
+async function processMessageInBackground(message) {
+  await connectDB(); // Reconnect if needed
 
   const chatId = message.chat.id;
-  console.log("Received message from Telegram:", message);
 
-  // ✅ Handle contact sharing — create user WITH NESTED parts.items
-  if (message.contact) {
-    try {
+  try {
+    // 🔁 Your existing logic goes here:
+    if (message.contact) {
+      // ... handle contact/order creation
       const phoneNumber = message.contact.phone_number;
       console.log("Received phone number:", phoneNumber);
 
       await sendMessage(
         chatId,
-        `Creating an order using phone number: ${phoneNumber}`
+        `Creating an order using phone number: ${phoneNumber}`,
       );
 
       const pendingOrder = await PendingOrder.findOne({ chatId }).lean();
       if (!pendingOrder) {
         await sendMessage(chatId, "No pending order found.");
-        return res.status(200).json({ status: "no pending order" });
+        return;
       }
 
       const chatDoc = await Chat.findOne({ "user.id": chatId }).lean();
@@ -76,17 +117,14 @@ export default async function handler(req, res) {
 
       const enrichedParts = findEnrichedParts(
         pendingOrder.partNumbers,
-        chatDoc
+        chatDoc,
       );
       const plainParts = enrichedParts.map((p) =>
-        p.toObject ? p.toObject() : p
+        p.toObject ? p.toObject() : p,
       );
-      console.log("Enriched parts:", plainParts);
 
       // Validate each part has required fields
       for (const part of plainParts) {
-        console.log("Part: ", part);
-
         if (
           !part.brand ||
           !part.partName ||
@@ -94,16 +132,25 @@ export default async function handler(req, res) {
           part.orderQuantity == null ||
           part.partPrice == null
         ) {
-          console.log(
-            `Part Data: ${part.brand}, ${part.partName}, ${part.article}, ${part.orderQuantit}, ${part.partPrice}`
-          );
           throw new Error("Missing required part data");
         }
       }
 
       const orderId = Math.floor(
-        10000000000 + Math.random() * 900000
+        10000000000 + Math.random() * 900000,
       ).toString();
+
+      const vinRes = await fetch(
+        `${process.env.NEXT_PUBLIC_BASE_URL}/api/py/vin_data`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vin: vin?.toUpperCase().trim(),
+          }),
+        },
+      );
+      const carData = await vinRes.json();
 
       const newUser = new User({
         phone: phoneNumber,
@@ -148,11 +195,11 @@ export default async function handler(req, res) {
 
       await sendMessage(
         chatId,
-        `✅ Your Order Has Been Successfully Created! Your Order Id is ${orderId}!`
+        `✅ Your Order Has Been Successfully Created! Your Order Id is ${orderId}!`,
       );
       await sendMessage(
         chatId,
-        "We Also Have Repair Work Services, Do You Want To Make An Appointment?"
+        "We Also Have Repair Work Services, Do You Want To Make An Appointment?",
       );
 
       await Chat.findOneAndUpdate(
@@ -166,7 +213,7 @@ export default async function handler(req, res) {
               metadata: { role: "assistant" },
             },
           },
-        }
+        },
       );
       await Chat.findOneAndUpdate(
         { "user.id": chatId.toString() },
@@ -177,65 +224,52 @@ export default async function handler(req, res) {
               metadata: { role: "assistant" },
             },
           },
-        }
+        },
+      );
+    } else {
+      // ... handle text/photo + call /api/chat/user-question
+      let userMessages = [];
+      let userImages = [];
+
+      if (message.photo) {
+        const photo = message.photo[message.photo.length - 1];
+        const fileId = photo.file_id;
+        const caption = message.caption || "";
+
+        await sendMessage(chatId, "📸 Received your image!");
+        const fileUrl = await handlePhotoFile(fileId, chatId, caption);
+        userImages.push(fileUrl);
+      }
+
+      const textContent = message.text || message.caption || "";
+      if (textContent) userMessages.push(textContent);
+
+      const apiResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_BASE_URL}/api/chat/user-question`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userMessages,
+            userImages,
+            source: "telegram",
+            chatId,
+          }),
+        },
       );
 
-      return res.status(200).json({ success: true, phoneNumber });
-    } catch (err) {
-      console.error("Error creating order:", err);
-      await sendMessage(chatId, `❌ Error: ${err.message}`);
-      return res.status(200).json({ error: err.message });
-    }
-  }
+      const data = await apiResponse.json();
+      console.log("Response from /api/chat/user-question:", data);
 
-  // ✅ Handle regular messages
-  try {
-    let userMessages = [];
-    let userImages = [];
-
-    if (message.photo) {
-      const photo = message.photo[message.photo.length - 1];
-      const fileId = photo.file_id;
-      const caption = message.caption || "";
-
-      await sendMessage(chatId, "📸 Received your image!");
-      const fileUrl = await handlePhotoFile(fileId, chatId, caption);
-      userImages.push(fileUrl);
-    }
-
-    const textContent = message.text || message.caption || "";
-    if (textContent) userMessages.push(textContent);
-
-    const apiResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/api/chat/user-question`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userMessages,
-          userImages,
-          source: "telegram",
-          chatId,
-        }),
+      if (data.response) {
+        await sendMessage(chatId, data.response);
+      } else {
+        await sendMessage(chatId, "Sorry, no response was generated.");
       }
-    );
-
-    const data = await apiResponse.json();
-    console.log("Response from /api/chat/user-question:", data);
-
-    if (data.response) {
-      await sendMessage(chatId, data.response);
-    } else {
-      await sendMessage(chatId, "Sorry, no response was generated.");
     }
-
-    return res.status(200).json({ status: "ok" });
-  } catch (error) {
-    console.error("Webhook error:", error);
-    await sendMessage(
-      chatId,
-      "An error occurred while processing your message."
-    );
-    return res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("Error in background processing:", err);
+    // Optionally send error message to user
+    await sendMessage(chatId, `❌ Error: ${err.message}`);
   }
 }

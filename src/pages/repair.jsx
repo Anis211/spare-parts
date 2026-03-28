@@ -50,11 +50,23 @@ export default function Index() {
 
         if (data[0].chat?.messages.length != 0) {
           for (const message of data[0].chat.messages) {
-            chat.push({
-              role: message.metadata.role,
-              content: message.text,
-              time: message.metadata.createdAt.split("T")[1].slice(0, -5),
-            });
+            if (message.metadata?.clientId != null) {
+              chat.push({
+                role: message.metadata.role,
+                content: message.text,
+                clientData:
+                  data[0].chat.chatData.nextClientData.find(
+                    (item) => item.id === message.metadata.clientId,
+                  ) || null,
+                time: message.metadata.createdAt.split("T")[1].slice(0, -5),
+              });
+            } else {
+              chat.push({
+                role: message.metadata.role,
+                content: message.text,
+                time: message.metadata.createdAt.split("T")[1].slice(0, -5),
+              });
+            }
           }
         }
 
@@ -114,9 +126,9 @@ export default function Index() {
                     item.title == "Log Out"
                       ? "text-[hsl(0_100%_75%)]"
                       : activeTab == item.title.split(" ")[0] &&
-                        item.title != "Shop Sales"
-                      ? "text-[hsl(45_100%_51%)]"
-                      : "text-[hsl(45_100%_95%)]"
+                          item.title != "Shop Sales"
+                        ? "text-[hsl(45_100%_51%)]"
+                        : "text-[hsl(45_100%_95%)]"
                   }`}
                   onClick={() => {
                     if (item.title == "Main Page") {
@@ -150,7 +162,7 @@ export default function Index() {
           <h1 className="ml-4 text-xl font-bold">
             {activeTab != "Details"
               ? titles.filter(
-                  (item) => item.title.split(" ")[0] == activeTab
+                  (item) => item.title.split(" ")[0] == activeTab,
                 )[0].title
               : "Order Details"}
           </h1>

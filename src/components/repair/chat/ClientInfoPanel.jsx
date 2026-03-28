@@ -2,7 +2,7 @@ import { Phone, Car, FileText, Wrench, User, Calendar } from "lucide-react";
 import { Button } from "@/components/repair/ui/button";
 import { cn } from "@/lib/utils";
 
-export function ClientInfoPanel({ client, onCallCustomer, onStartRepair }) {
+export function ClientInfoPanel({ client, onStartRepair }) {
   return (
     <div
       className="w-full max-w-md rounded-xl border overflow-hidden shadow-lg"
@@ -36,13 +36,6 @@ export function ClientInfoPanel({ client, onCallCustomer, onStartRepair }) {
             <h3 className="font-semibold" style={{ color: "hsl(45 10% 95%)" }}>
               {client.clientName}
             </h3>
-            <div
-              className="flex items-center gap-1.5 text-sm"
-              style={{ color: "hsl(220 10% 55%)" }}
-            >
-              <Phone className="h-3.5 w-3.5" />
-              {client.phone}
-            </div>
           </div>
         </div>
       </div>
@@ -65,7 +58,7 @@ export function ClientInfoPanel({ client, onCallCustomer, onStartRepair }) {
               className="text-sm font-medium"
               style={{ color: "hsl(45 10% 95%)" }}
             >
-              {client.date} at {client.time}
+              {client.date.split("T")[0]} at {client.time}
             </div>
           </div>
           <span
@@ -250,25 +243,11 @@ export function ClientInfoPanel({ client, onCallCustomer, onStartRepair }) {
         <div className="flex gap-2 pt-2">
           <Button
             size="sm"
-            className="flex-1"
+            className="flex-1 disabled:opacity-50"
             onClick={onStartRepair}
-            style={
-              {
-                // Ensure Button respects primary styling if needed internally;
-                // if Button is unstyled or generic, you may need to pass className/style down.
-              }
-            }
+            disabled={client.status != "appointed"}
           >
             Start Repair
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onCallCustomer}
-            className="text-white"
-          >
-            <Phone className="h-4 w-4 mr-1" />
-            Call
           </Button>
         </div>
       </div>
