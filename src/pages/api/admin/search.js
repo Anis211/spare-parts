@@ -55,7 +55,7 @@ const llmChat = (messages, options = {}) =>
           );
         },
       },
-    }
+    },
   );
 
 // === Wrapper For Bulkhead And Circuit Breaker ===
@@ -75,58 +75,24 @@ export default async function handler(req, res) {
   if (req.method != "POST") {
     res.status(500).json("Wrong request method!");
   }
-  const { partName, vin } = req.body;
-  let partNumber = "";
 
+  const { partName, vin } = req.body;
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL || `http://${req.headers.host}`;
 
   try {
     console.log("Fetching part number for:", partName, vin);
 
-    const partRes = await fetch(`${baseUrl}/api/mock/mock?vin=${vin}`);
-    const carData = await partRes.json();
-    const resText = `Found data for vin number ${vin}: ${
-      carData.success ? JSON.stringify(carData.data) : "No data found"
-    }`;
-
-    // Ask LLM to extract part number
-    const extractionMessages = [
-      {
-        role: "system",
-        content: `You are an expert automotive parts matcher. The user will provide a short query (e.g., "oil filter", "front brake pad"). 
-    You will be given a list of available parts with their display names and part numbers.
-    Your task:
-    - Find the SINGLE most relevant part based on the user's query.
-    - Return ONLY the exact part number (e.g., "12345-ABC") — nothing else.
-    - If no match is found, return exactly: "NOT FOUND"
-    - Do NOT explain, apologize, add punctuation, or markdown. Just the part number or "NOT FOUND".`,
-      },
-      {
-        role: "user",
-        content: `User query: "${partName}"
-    Available parts data: ${resText}`,
-      },
-    ];
-
-    const aiResponse = await llmChat(extractionMessages, {
-      model: "gpt-4o",
-      temperature: 0,
+    const partRes = await fetch(`${baseUrl}/api/search/catalogSearch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vin: vin.toUpperCase().trim(),
+        partName: partName,
+      }),
     });
-    partNumber = aiResponse.choices[0].message.content.trim();
-
-    const history = await VinData.findOne({ vin: vin.toUpperCase() });
-    const part = history?.records.find((r) => r.user.part === partName);
-
-    if (part != undefined) {
-      console.log("Existing Part in History:", part);
-      console.log("Full History Records:", history.records);
-
-      return res.status(200).json({
-        message: "This part had already been searched",
-        answer: part,
-      });
-    }
+    const carData = await partRes.json();
+    const { partNumber } = carData.secondResponseData;
 
     if (partNumber === "NOT FOUND") {
       throw new Error("No relevant part found for the given name");
@@ -146,11 +112,11 @@ export default async function handler(req, res) {
     const proxyAutotradeAuthUrl = `${baseUrl}/api/py/autotrade_auth`;
 
     // ── helpers ───────────────────────────────────────────────────────────────────
-    const fetchWithTimeout = (url, opts = {}, ms = 20000) => {
+    const fetchWithTimeout = (url, opts = {}, ms = 60000) => {
       const ctl = new AbortController();
       const t = setTimeout(() => ctl.abort(), ms);
       return fetch(url, { ...opts, signal: ctl.signal }).finally(() =>
-        clearTimeout(t)
+        clearTimeout(t),
       );
     };
 
@@ -159,9 +125,9 @@ export default async function handler(req, res) {
     function mergeStocks(a = [], b = []) {
       // flatten + remove obvious dupes by (place, partPrice, delivery.start, delivery.end)
       const keyOf = (s) =>
-        `${normalize(s.place)}|${s.partPrice}|${s.delivery?.start ?? ""}|${
-          s.delivery?.end ?? ""
-        }`;
+        `${normalize(s.place)}|${s.partPrice}|${
+          s.delivery?.start ?? ""
+        }|${s.delivery?.end ?? ""}`;
       const seen = new Set();
       const out = [];
       for (const s of [...a, ...b]) {
@@ -240,12 +206,17 @@ export default async function handler(req, res) {
     }
 
     async function mapShatem(d) {
+      // d is the response from /api/py/shatem:
+      // { searched_number, selected_part, selection_reason, analogs: [...], analogs_media: [...], ... }
+
       const analogs = await Promise.all(
         (d?.analogs ?? []).map(async (item) => {
+          // Match media by article + brand
           const analog_media_data = d?.analogs_media?.find(
             (media) =>
-              media.article == item.article &&
-              media.brand == item.partInfo.tradeMarkName
+              media.article === item.article &&
+              (media.brand === item.brand ||
+                media.brand === item.partInfo?.tradeMarkName),
           );
 
           const rawList = Array.isArray(analog_media_data?.media)
@@ -255,11 +226,16 @@ export default async function handler(req, res) {
           const pictures = await Promise.all(
             rawList.map(async (m, idx) => {
               try {
-                const base64 = m.value.split(",")[1];
+                const base64 = m.value?.split(",")?.[1];
+                if (!base64) return null;
+
                 const buffer = Buffer.from(base64, "base64");
                 const contentType =
-                  m.value.match(/^data:(.*?);/)?.[1] || "image/jpeg";
-                const filename = `${item.article}_${item.partInfo.tradeMarkName}_${idx}.jpg`;
+                  m.value?.match(/^data:(.*?);/)?.[1] || "image/jpeg";
+                const brand =
+                  item.brand || item.partInfo?.tradeMarkName || "unknown";
+                const filename = `${item.article}_${brand}_${idx}.jpg`;
+
                 const id = await saveToGridFS({
                   buffer,
                   contentType,
@@ -270,32 +246,44 @@ export default async function handler(req, res) {
                 console.warn("GridFS save skipped:", e.message);
                 return null;
               }
-            })
+            }),
           );
 
+          // 🔥 Map with detailed name priority
           return {
             source: "shatem",
-            original_id: item.partInfo.id,
+            original_id: item.guid || item.partInfo?.id,
             article: item.article,
-            brand: item.partInfo.tradeMarkName,
-            name: item.name,
+            brand: item.brand || item.partInfo?.tradeMarkName,
+            // 🔥 Use Shatem's detailed description as primary name
+            name:
+              item.name ||
+              item.partInfo?.description ||
+              item.partInfo?.descriptionFormatted ||
+              "",
             guid: item.guid,
             pictures: pictures.filter(Boolean),
             stocks: [
               {
                 partPrice: item.price,
                 place: item.city,
+                currency: item.currency,
+                availability: item.availability,
+                inventory: item.inventory,
+                location: item.location,
                 delivery: {
-                  start: item.deliveryInfo.deliveryDateTimes[0].deliveryDate,
+                  start:
+                    item.deliveryDate ||
+                    item.deliveryInfo?.deliveryDateTimes?.[0]?.deliveryDate,
                   end: "",
                 },
               },
             ],
           };
-        })
+        }),
       );
 
-      return { original: null, analogs }; // <- return an object like your other mappers
+      return { original: null, analogs };
     }
 
     const mapAutotrade = (d) => {
@@ -324,73 +312,144 @@ export default async function handler(req, res) {
       return { original: null, analogs };
     };
 
-    // get/refresh Alatrade cookies in parallel with Rossko (fast)
-    async function ensureAlatradeAuth() {
-      let alatrade = await Alatrade.findOne({}).lean();
+    async function ensureAlatradeAuth({ forceRefresh = false } = {}) {
       const expired = (expires) => {
         if (!expires) return true;
         const d = new Date(expires);
         if (!Number.isFinite(+d)) return true;
-        const exUTC = Date.UTC(
-          d.getUTCFullYear(),
-          d.getUTCMonth(),
-          d.getUTCDate()
-        );
-        const now = new Date();
-        const nowUTC = Date.UTC(
-          now.getUTCFullYear(),
-          now.getUTCMonth(),
-          now.getUTCDate()
-        );
-        return exUTC < nowUTC;
+        // Compare with 1-hour buffer to avoid edge cases
+        return d.getTime() < Date.now() - 3600_000;
       };
-      const needRefresh =
-        !alatrade ||
-        expired(alatrade?.ci_session?.expires) ||
-        expired(alatrade?.rem_id?.expires);
 
-      if (needRefresh) {
-        const r = await fetchWithTimeout(proxyAlatradeAuthUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        const data = await r.json();
-        const next = {
-          ci_session: {
-            value: data?.auth_data?.find((c) => c.name === "ci_sessions")
-              ?.value,
-            expires: data?.auth_data?.find((c) => c.name === "ci_sessions")
-              ?.expires,
-          },
-          rem_id: {
-            value: data?.auth_data?.find((c) => c.name === "REMMEID")?.value,
-            expires: data?.auth_data?.find((c) => c.name === "REMMEID")
-              ?.expires,
-          },
-        };
-        alatrade
-          ? (alatrade = await Alatrade.findOneAndUpdate({}, next, {
-              new: true,
-              lean: true,
-            }))
-          : (alatrade = (await Alatrade.create(next)).toObject?.() ?? next);
+      // Try to get cached auth first
+      let cached = null;
+      try {
+        cached = await Alatrade.findOne({}).lean();
+      } catch (e) {
+        console.warn(
+          "[Alatrade] DB read error, proceeding to refresh:",
+          e.message,
+        );
       }
 
-      return {
-        ci: alatrade.ci_session.value,
-        rem: alatrade.rem_id.value,
+      const hasValidCookies =
+        cached?.ci_session?.value &&
+        cached?.rem_id?.value &&
+        !expired(cached.ci_session.expires) &&
+        !expired(cached.rem_id.expires);
+
+      if (!forceRefresh && hasValidCookies) {
+        console.log("[Alatrade] Using cached auth");
+        return { ci: cached.ci_session.value, rem: cached.rem_id.value };
+      }
+
+      console.log("[Alatrade] Refreshing auth...");
+
+      // Fetch fresh auth with retry
+      const authResult = await fetchAlatradeAuthInline();
+
+      // Save to DB
+      const next = {
+        ci_session: {
+          value: authResult.ci,
+          expires: authResult.raw?.find((c) => c.name === "ci_sessions")
+            ?.expires,
+        },
+        rem_id: {
+          value: authResult.rem,
+          expires: authResult.raw?.find((c) => c.name === "REMMEID")?.expires,
+        },
+        lastRefreshed: new Date(),
       };
+
+      try {
+        if (cached?._id) {
+          await Alatrade.findByIdAndUpdate(cached._id, next, {
+            upsert: true,
+          });
+        } else {
+          await Alatrade.create(next);
+        }
+        console.log("[Alatrade] Auth saved to DB");
+      } catch (dbErr) {
+        console.warn(
+          "[Alatrade] DB save failed, continuing with in-memory auth:",
+          dbErr.message,
+        );
+        // Continue anyway - auth still works, just not persisted
+      }
+
+      return { ci: authResult.ci, rem: authResult.rem };
     }
 
-    async function ensureShatemAuth() {
+    async function ensureShatemAuth({ forceRefresh = false } = {}) {
+      console.log("[Shatem] ensureShatemAuth called", { forceRefresh });
+
+      // Helper: Check if token is expired (with 1-hour buffer)
+      const expired = (expires) => {
+        if (!expires) return true;
+        const d = new Date(expires);
+        if (!Number.isFinite(+d)) return true;
+        // Consider expired if 1 hour before actual expiry (safety buffer)
+        return d.getTime() < Date.now() - 3600_000;
+      };
+
+      // Try to get cached auth from DB
+      let cached = null;
+      try {
+        cached = await ShatemAuth.findOne({}).lean();
+        console.log("[Shatem] Cached auth:", {
+          has_antiforgery: !!cached?.antiforgery?.value,
+          has_access: !!cached?.x_access_token?.value,
+          has_refresh: !!cached?.x_refresh_token?.value,
+          access_expires: cached?.x_access_token?.expires,
+          refresh_expires: cached?.x_refresh_token?.expires,
+        });
+      } catch (e) {
+        console.warn(
+          "[Shatem] DB read error, proceeding to refresh:",
+          e.message,
+        );
+      }
+
+      // Check if all required tokens are present and not expired
+      const hasValidCookies =
+        cached?.antiforgery?.value &&
+        cached?.x_access_token?.value &&
+        !expired(cached.antiforgery.expires) &&
+        !expired(cached.x_access_token.expires);
+
+      console.log("[Shatem] hasValidCookies:", hasValidCookies);
+
+      // Return cached auth if valid and not forcing refresh
+      if (!forceRefresh && hasValidCookies) {
+        console.log("[Shatem] Using cached auth");
+        return {
+          antiforgery: cached.antiforgery.value,
+          x_access_token: cached.x_access_token.value,
+          x_refresh_token: cached.x_refresh_token?.value || "",
+        };
+      }
+
+      // Fetch fresh auth from API
+      console.log("[Shatem] Refreshing auth...");
       const r = await fetchWithTimeout(proxyShatemAuthUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
       if (!r.ok) throw new Error(`Shatem auth HTTP ${r.status}`);
       const data = await r.json();
-      const cookies = Array.isArray(data?.auth_data) ? data.auth_data : [];
 
+      // Handle structured Python errors
+      if (data.error) {
+        const err = new Error(data.error);
+        err.retryable = data.retryable ?? true;
+        err.pythonError = data;
+        throw err;
+      }
+
+      // Parse cookies from response
+      const cookies = Array.isArray(data?.auth_data) ? data.auth_data : [];
       const get = (name) => cookies.find((c) => c.name === name)?.value || "";
 
       const antiforgery = get(".AspNetCore.Antiforgery.VyLW6ORzMgk");
@@ -398,12 +457,96 @@ export default async function handler(req, res) {
       const x_refresh_token = get("X-Refresh-Token");
 
       if (!antiforgery || !x_access_token) {
-        throw new Error("Shatem auth is missing required cookies");
+        throw new Error("Shatem auth missing required cookies");
       }
+
+      // Extract expiration dates from cookies (if available)
+      const parseCookieExpiry = (cookie) => {
+        const c = cookies.find((c) => c.name === cookie);
+        return c?.expires ? new Date(c.expires) : null;
+      };
+
+      // Save fresh auth to DB
+      const next = {
+        antiforgery: {
+          value: antiforgery,
+          expires: parseCookieExpiry(".AspNetCore.Antiforgery.VyLW6ORzMgk"),
+        },
+        x_access_token: {
+          value: x_access_token,
+          expires: parseCookieExpiry("X-Access-Token"),
+        },
+        x_refresh_token: {
+          value: x_refresh_token,
+          expires: parseCookieExpiry("X-Refresh-Token"),
+        },
+        lastRefreshed: new Date(),
+      };
+
+      try {
+        // Upsert: update if exists, insert if not
+        await ShatemAuth.findOneAndUpdate({}, next, {
+          upsert: true,
+          new: true,
+        });
+        console.log("[Shatem] Auth saved to DB");
+      } catch (dbErr) {
+        console.warn(
+          "[Shatem] DB save failed, continuing with in-memory auth:",
+          dbErr.message,
+        );
+        // Continue anyway - auth still works, just not persisted
+      }
+
       return { antiforgery, x_access_token, x_refresh_token };
     }
 
-    async function ensureAutotradeAuth() {
+    async function ensureAutotradeAuth({ forceRefresh = false } = {}) {
+      console.log("[Autotrade] ensureAutotradeAuth called", {
+        forceRefresh,
+      });
+
+      // Helper: Check if token is expired (with 1-hour buffer)
+      const expired = (expires) => {
+        if (!expires) return true;
+        const d = new Date(expires);
+        if (!Number.isFinite(+d)) return true;
+        return d.getTime() < Date.now() - 3600_000;
+      };
+
+      // Try to get cached auth from DB
+      let cached = null;
+      try {
+        cached = await AutotradeAuth.findOne({}).lean();
+        console.log("[Autotrade] Cached auth:", {
+          has_jar: !!cached?.cookie_jar?.value,
+          jar_expires: cached?.cookie_jar?.expires,
+        });
+      } catch (e) {
+        console.warn(
+          "[Autotrade] DB read error, proceeding to refresh:",
+          e.message,
+        );
+      }
+
+      // Check if cookie jar is present and not expired
+      const hasValidJar =
+        cached?.cookie_jar?.value && !expired(cached.cookie_jar.expires);
+
+      console.log("[Autotrade] hasValidJar:", hasValidJar);
+
+      // Return cached auth if valid and not forcing refresh
+      if (!forceRefresh && hasValidJar) {
+        console.log("[Autotrade] Using cached auth");
+        try {
+          return JSON.parse(cached.cookie_jar.value);
+        } catch {
+          console.warn("[Autotrade] Cached jar parse failed, refreshing");
+        }
+      }
+
+      // Fetch fresh auth from API
+      console.log("[Autotrade] Refreshing auth...");
       const r = await fetchWithTimeout(proxyAutotradeAuthUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -411,9 +554,34 @@ export default async function handler(req, res) {
       if (!r.ok) throw new Error(`Autotrade Auth HTTP ${r.status}`);
       const data = await r.json();
 
-      // Extract jar based on your previous python script output
+      // Extract jar from response
       const jar = data.cookie_jar || data.auth_data?.cookie_jar;
       if (!jar) throw new Error("Autotrade auth missing cookie_jar");
+
+      // Estimate expiration (Autotrade doesn't provide explicit expiry; assume 24h)
+      const estimatedExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      // Save fresh auth to DB
+      const next = {
+        cookie_jar: {
+          value: JSON.stringify(jar),
+          expires: estimatedExpiry,
+        },
+        lastRefreshed: new Date(),
+      };
+
+      try {
+        await AutotradeAuth.findOneAndUpdate({}, next, {
+          upsert: true,
+          new: true,
+        });
+        console.log("[Autotrade] Auth saved to DB");
+      } catch (dbErr) {
+        console.warn(
+          "[Autotrade] DB save failed, continuing with in-memory auth:",
+          dbErr.message,
+        );
+      }
 
       return jar;
     }
@@ -453,134 +621,355 @@ export default async function handler(req, res) {
       windowMs: 60_000,
     });
 
-    // ── run all vendors concurrently ───────────────────────────────────────────
-    const alatradeTokenPromise = ensureAlatradeAuth();
-    const shatemTokenPromise = ensureShatemAuth();
-    const autotradeTokenPromise = ensureAutotradeAuth();
+    async function runWithRetry(label, fn, options = {}) {
+      const {
+        maxAttempts = 3,
+        initialDelayMs = 700,
+        backoffMultiplier = 1.7,
+        maxDelayMs = 10000,
+        isRetryable = defaultIsRetryable,
+        onAttempt = () => {},
+        fallbackValue = null,
+      } = options;
 
-    // Rossko (bulkhead + circuit breaker)
-    const rosskoPromise = resilientVendorCall(
-      rosskoBreaker,
-      rosskoSemaphore,
-      async () => {
-        const r = await fetchWithTimeout(proxyRosskoUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ partNumber, partName }),
-        });
-        if (!r.ok) throw new Error(`Rossko HTTP ${r.status}`);
-        return r.json();
+      let lastError;
+      let delay = initialDelayMs;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const startTime = Date.now();
+        try {
+          console.log(`[${label}] attempt ${attempt}/${maxAttempts}`);
+
+          const result = await fn();
+
+          // Success hook
+          onAttempt(attempt, null, result);
+          console.log(`[${label}] ✓ success in ${Date.now() - startTime}ms`);
+          return result;
+        } catch (err) {
+          lastError = err;
+          const elapsed = Date.now() - startTime;
+
+          // Determine if error is retryable
+          const retryable = isRetryable(err);
+
+          // Attempt hook (for logging/metrics)
+          onAttempt(attempt, err, null);
+
+          console.warn(
+            `[${label}] attempt ${attempt} failed after ${elapsed}ms: ${err.message}${retryable ? " (retryable)" : " (permanent)"}${
+              err.pythonError?.error ? ` [${err.pythonError.error}]` : ""
+            }`,
+          );
+
+          // Don't retry permanent errors
+          if (!retryable) {
+            console.error(`[${label}] permanent failure, stopping retries`);
+            break;
+          }
+
+          // Exponential backoff with jitter before next attempt
+          if (attempt < maxAttempts) {
+            const jitter = Math.random() * 200; // 0-200ms randomization
+            const nextDelay = Math.min(
+              Math.ceil(delay * backoffMultiplier) + jitter,
+              maxDelayMs,
+            );
+            console.log(`[${label}] retrying in ${Math.round(nextDelay)}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, nextDelay));
+            delay = nextDelay; // Update for next iteration
+          }
+        }
       }
+
+      // All attempts exhausted
+      console.error(`[${label}] ✗ all ${maxAttempts} attempts failed`);
+
+      // Return fallback instead of throwing (keeps Promise.allSettled happy)
+      return fallbackValue;
+    }
+
+    function defaultIsRetryable(err) {
+      // Explicit retryable flag from Python structured errors
+      if (err.retryable !== undefined) return err.retryable;
+      if (err.pythonError?.retryable !== undefined)
+        return err.pythonError.retryable;
+
+      const msg = (err.message || "").toLowerCase();
+      const pythonErr = err.pythonError?.error?.toLowerCase() || "";
+
+      // Network/timeout errors
+      if (
+        msg.includes("timeout") ||
+        msg.includes("network") ||
+        msg.includes("fetch failed")
+      )
+        return true;
+      if (
+        msg.includes("econnrefused") ||
+        msg.includes("enotfound") ||
+        msg.includes("econnreset")
+      )
+        return true;
+
+      // HTTP status codes
+      if (msg.includes("429") || msg.includes("rate limit")) return true; // Rate limited
+      if (msg.match(/5\d{2}/)) return true; // 5xx server errors
+
+      // Python error codes
+      if (pythonErr.includes("timeout") || pythonErr.includes("network"))
+        return true;
+      if (
+        pythonErr.includes("rate_limited") ||
+        pythonErr.includes("anticaptcha_unavailable")
+      )
+        return true;
+      if (
+        pythonErr.includes("captcha_solve_failed") ||
+        pythonErr.includes("auth_transient")
+      )
+        return true;
+
+      // Empty/invalid responses (often transient)
+      if (
+        msg.includes("empty output") ||
+        msg.includes("unexpected token") ||
+        msg.includes("json parse")
+      )
+        return true;
+
+      // Default: assume unknown errors are NOT retryable (fail fast for bugs)
+      return false;
+    }
+
+    // ── Generic vendor runner: auth + fetch + retry + circuit breaker ──────────
+    async function runVendorWithAuthRetry({
+      name,
+      fetchAuth, // async () => { ci, rem } or similar
+      fetchAnalog, // async (auth) => response JSON
+      mapper, // (data) => { original, analogs }
+      breaker,
+      semaphore,
+      retryOptions = {},
+    }) {
+      return runWithRetry(
+        name,
+        async () => {
+          // Run inside semaphore + circuit breaker
+          return await resilientVendorCall(breaker, semaphore, async () => {
+            // Fetch auth FRESH on each retry attempt (critical!)
+            const auth = fetchAuth ? await fetchAuth() : null;
+
+            // Fetch analogs with auth
+            const rawData = await fetchAnalog(auth);
+
+            // Map to common format
+            return mapper(rawData);
+          });
+        },
+        {
+          fallbackValue: { original: null, analogs: [] },
+          ...retryOptions,
+        },
+      );
+    }
+
+    // ── Helper: Fetch Alatrade auth with retry (inline) ────────────────────────
+    const fetchAlatradeAuthInline = async (maxAttempts = 2) => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          console.log(`[alatrade-auth] inline attempt ${attempt}`);
+
+          const r = await fetchWithTimeout(proxyAlatradeAuthUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+
+          if (!r.ok) throw new Error(`Auth HTTP ${r.status}`);
+
+          const data = await r.json();
+
+          // Handle structured Python errors
+          if (data.error) {
+            const err = new Error(data.error);
+            err.retryable = data.retryable ?? true;
+            err.pythonError = data;
+            throw err;
+          }
+
+          const authData = data.auth_data || data;
+          if (!Array.isArray(authData) || authData.length === 0) {
+            throw Object.assign(new Error("Empty auth response"), {
+              retryable: true,
+            });
+          }
+
+          const ciSession = authData.find((c) => c.name === "ci_sessions");
+          const remId = authData.find((c) => c.name === "REMMEID");
+
+          if (!ciSession?.value || !remId?.value) {
+            throw new Error("Missing required cookies");
+          }
+
+          return { ci: ciSession.value, rem: remId.value, raw: authData };
+        } catch (err) {
+          const isRetryable =
+            err.retryable ?? err.pythonError?.retryable ?? true;
+          console.warn(
+            `[alatrade-auth] attempt ${attempt} failed: ${err.message}${isRetryable ? " (retryable)" : ""}`,
+          );
+
+          if (!isRetryable || attempt === maxAttempts) throw err;
+
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        }
+      }
+    };
+
+    // ── Define vendor configs ──────────────────────────────────────────────────
+    const vendorConfigs = [
+      {
+        name: "rossko",
+        fetchAuth: null, // No auth needed
+        fetchAnalog: async () => {
+          const r = await fetchWithTimeout(proxyRosskoUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ partNumber, partName }),
+          });
+          if (!r.ok) throw new Error(`Rossko HTTP ${r.status}`);
+          return r.json();
+        },
+        mapper: mapRossko,
+        breaker: rosskoBreaker,
+        semaphore: rosskoSemaphore,
+        retryOptions: { maxAttempts: 3 },
+      },
+      {
+        name: "alatrade",
+        // ✅ Use ensureAlatradeAuth to check cache + expiration
+        fetchAuth: async () => {
+          const { ci, rem } = await ensureAlatradeAuth();
+          return { ci, rem };
+        },
+        fetchAnalog: async (auth) => {
+          const r = await fetchWithTimeout(proxyAlatradeUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              partNumber,
+              partName,
+              ci_session: auth.ci,
+              rem_id: auth.rem,
+            }),
+          });
+          if (!r.ok) throw new Error(`Alatrade HTTP ${r.status}`);
+          return r.json();
+        },
+        mapper: mapAlatrade,
+        breaker: alatradeBreaker,
+        semaphore: alatradeSemaphore,
+        retryOptions: {
+          maxAttempts: 3,
+          isRetryable: (err) => {
+            if (
+              err.message?.includes("auth") ||
+              err.pythonError?.error?.includes("auth")
+            )
+              return true;
+            return defaultIsRetryable(err);
+          },
+        },
+      },
+      {
+        name: "shatem",
+        // ✅ Use ensureShatemAuth to check cache + expiration
+        fetchAuth: async () => {
+          const { antiforgery, x_access_token, x_refresh_token } =
+            await ensureShatemAuth();
+          return { antiforgery, x_access_token, x_refresh_token };
+        },
+        fetchAnalog: async (auth) => {
+          const r = await fetchWithTimeout(proxyShatemUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              partNumber,
+              agreement: SHATEM_AGREEMENT,
+              partName,
+              antiforgery: auth.antiforgery,
+              x_access_token: auth.x_access_token,
+              x_refresh_token: auth.x_refresh_token, // 🔥 Include refresh token if needed
+            }),
+          });
+          if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
+          return r.json();
+        },
+        mapper: mapShatem,
+        breaker: shatemBreaker,
+        semaphore: shatemSemaphore,
+        retryOptions: { maxAttempts: 2, initialDelayMs: 1500 },
+      },
+      {
+        name: "autotrade",
+        // ✅ Use ensureAutotradeAuth to check cache + expiration
+        fetchAuth: async () => {
+          const jar = await ensureAutotradeAuth();
+          return jar;
+        },
+        fetchAnalog: async (jar) => {
+          const payload = {
+            q: partNumber,
+            auth_key: ":auth_key",
+            sessid: jar.sessid,
+            ddg8: jar.__ddg8_,
+            ddg9: jar.__ddg9_,
+            ddg10: jar.__ddg10_,
+            ddg1: jar.__ddg1_,
+            lang: jar.lang,
+            series: jar.series,
+            logindt: jar.logindt,
+          };
+          const r = await fetchWithTimeout(proxyAutotradeUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!r.ok) throw new Error(`Autotrade HTTP ${r.status}`);
+          return r.json();
+        },
+        mapper: mapAutotrade,
+        breaker: autotradeBreaker,
+        semaphore: autotradeSemaphore,
+        retryOptions: { maxAttempts: 3 },
+      },
+    ];
+
+    // ── Execute all vendors concurrently with proper retry logic ───────────────
+    console.log(
+      `[AGGREGATION] Starting vendor fetches for part: ${partNumber}`,
     );
 
-    // Alatrade (bulkhead + circuit breaker)
-    const alatradePromise = resilientVendorCall(
-      alatradeBreaker,
-      alatradeSemaphore,
-      async () => {
-        const { ci, rem } = await alatradeTokenPromise;
-        const r = await fetchWithTimeout(proxyAlatradeUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            partNumber,
-            partName,
-            ci_session: ci,
-            rem_id: rem,
-          }),
-        });
-        if (!r.ok) throw new Error(`Alatrade HTTP ${r.status}`);
-        return r.json();
-      }
+    const vendorResults = await Promise.all(
+      vendorConfigs.map((config) =>
+        runVendorWithAuthRetry(config).catch((err) => {
+          console.error(`[${config.name}] final failure: ${err.message}`);
+          return { original: null, analogs: [] };
+        }),
+      ),
     );
 
-    // Shatem (bulkhead + circuit breaker)
-    const shatemPromise = resilientVendorCall(
-      shatemBreaker,
-      shatemSemaphore,
-      async () => {
-        const { antiforgery, x_access_token, x_refresh_token } =
-          await shatemTokenPromise;
+    // ── Merge results ──────────────────────────────────────────────────────────
+    const [rossko, alatrade, shatem, autotrade] = vendorResults;
 
-        const r = await fetchWithTimeout(proxyShatemUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            partNumber,
-            agreement: SHATEM_AGREEMENT,
-            partName,
-            antiforgery,
-            x_access_token,
-            x_refresh_token,
-          }),
-        });
-        if (!r.ok) throw new Error(`Shatem HTTP ${r.status}`);
-        return r.json();
-      }
-    );
+    console.log({
+      rossko: rossko.analogs?.length || 0,
+      alatrade: alatrade.analogs?.length || 0,
+      shatem: shatem.analogs?.length || 0,
+      autotrade: autotrade.analogs?.length || 0,
+    });
 
-    const autotradePromise = resilientVendorCall(
-      autotradeBreaker,
-      autotradeSemaphore,
-      async () => {
-        const jar = await autotradeTokenPromise;
-
-        // Construct payload mapping cookie_jar keys to API expectations
-        const payload = {
-          q: partNumber, // Uses the extracted partNumber from LLM
-          auth_key: ":auth_key",
-          sessid: jar.sessid,
-          ddg8: jar.__ddg8_,
-          ddg9: jar.__ddg9_,
-          ddg10: jar.__ddg10_,
-          ddg1: jar.__ddg1_,
-          lang: jar.lang,
-          series: jar.series,
-          logindt: jar.logindt,
-        };
-
-        const r = await fetchWithTimeout(proxyAutotradeUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (!r.ok) throw new Error(`Autotrade HTTP ${r.status}`);
-        return r.json();
-      }
-    );
-    const emptyVendor = { original: null, analogs: [] };
-
-    const mapRosskoP = (val) => Promise.resolve(mapRossko(val));
-    const mapAlatradeP = (val) => Promise.resolve(mapAlatrade(val));
-    const mapShatemP = (val) => mapShatem(val);
-    const mapAutotradeP = (val) => Promise.resolve(mapAutotrade(val));
-
-    const [rossko, alatrade, shatem, autotrade] = await Promise.all([
-      rosskoPromise.then(mapRosskoP).catch((e) => {
-        console.error("[rossko] failed:", e?.message || e);
-        return emptyVendor;
-      }),
-      alatradePromise.then(mapAlatradeP).catch((e) => {
-        console.error("[alatrade] failed:", e?.message || e);
-        return emptyVendor;
-      }),
-      shatemPromise.then(mapShatemP).catch((e) => {
-        console.error("[shatem] failed:", e?.message || e);
-        return emptyVendor;
-      }),
-      autotradePromise.then(mapAutotradeP).catch((e) => {
-        console.error("[autotrade] failed:", e?.message || e);
-        return emptyVendor;
-      }),
-    ]);
-
-    console.log("rossko analogs:", rossko.analogs.length);
-    console.log("alatrade analogs:", alatrade.analogs.length);
-    console.log("shatem analogs:", shatem.analogs.length);
-    console.log("autotrade analogs:", autotrade.analogs.length);
-
-    // if Rossko returned an original product, prefer it for chatData.original
+    // Prefer Rossko original if available
     let original = rossko.original ??
       alatrade.original ?? {
         name: partName,
@@ -589,60 +978,70 @@ export default async function handler(req, res) {
         article: partNumber,
       };
 
-    // ── combine + dedupe analogs from BOTH sources ───────────────────────────────
+    // Combine all analogs (no filtering)
     const combined = [
-      ...rossko.analogs,
-      ...alatrade.analogs,
-      ...shatem.analogs,
-      ...autotrade.analogs,
-    ];
+      ...(rossko.analogs || []),
+      ...(alatrade.analogs || []),
+      ...(shatem.analogs || []),
+      ...(autotrade.analogs || []),
+    ].filter(Boolean);
 
-    console.log("combined: ", combined);
-
-    // key preference: article > (brand+name) when article missing
     const keyOf = (a) => {
       if (a.article && a.brand)
         return `a:${normalize(a.article)}|${normalize(a.brand)}`;
       if (a.article) return `a:${normalize(a.article)}`;
       if (a.brand && a.name)
         return `bn:${normalize(a.brand)}|${normalize(a.name)}`;
-      return `n:${normalize(a.name)}`; // last resort
+      return `n:${normalize(a.name)}`;
     };
 
     const mergedMap = new Map();
     for (const item of combined) {
       const k = keyOf(item);
       const prev = mergedMap.get(k);
+
       if (!prev) {
         mergedMap.set(k, {
           article: item.article ?? null,
           brand: item.brand ?? null,
-          name: item.name ?? null,
+          name:
+            item.source === "shatem" && item.name?.length > 10
+              ? item.name
+              : (item.name ?? null),
           guid: item.guid ?? null,
           pictures: Array.isArray(item.pictures) ? [...item.pictures] : [],
           stocks: Array.isArray(item.stocks) ? [...item.stocks] : [],
           sources: [item.source],
         });
       } else {
-        // prefer non-empty fields
+        if (
+          item.source === "shatem" &&
+          item.name?.length > 10 &&
+          (!prev.name || prev.name.length < 15)
+        ) {
+          prev.name = item.name;
+        }
+
+        // Merge other fields
         prev.article ||= item.article;
         prev.brand ||= item.brand;
-        prev.name ||= item.name;
         prev.guid ||= item.guid;
 
-        // merge arrays
         if (Array.isArray(item.pictures) && item.pictures.length) {
           const set = new Set([...(prev.pictures ?? []), ...item.pictures]);
           prev.pictures = [...set];
         }
         prev.stocks = mergeStocks(prev.stocks, item.stocks ?? []);
 
-        // track all sources (unique)
-        if (!prev.sources.includes(item.source)) prev.sources.push(item.source);
+        if (!prev.sources.includes(item.source)) {
+          prev.sources.push(item.source);
+        }
       }
     }
 
     const analogs = Array.from(mergedMap.values());
+    console.log(`[AGGREGATION] Completed: ${analogs.length} unique analogs`);
+
     res.status(200).json({ original: original, analogs: analogs });
   } catch (err) {
     res.status(500).json({ message: err.message });

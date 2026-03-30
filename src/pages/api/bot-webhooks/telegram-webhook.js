@@ -6,6 +6,7 @@ import PendingOrder from "@/models/PendingOrder";
 import connectDB from "@/lib/mongoose";
 import { findEnrichedParts } from "@/helpers/orderParts";
 import { isMessageProcessed, markMessageProcessed } from "@/lib/redis";
+import { extractCarDataFromVin } from "@/lib/extractCarDataFromVin";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -145,29 +146,28 @@ async function processMessageInBackground(message) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vin: vin?.toUpperCase().trim(),
-          }),
+          body: JSON.stringify({ vin: vin?.toUpperCase().trim() }),
         },
       );
       const carData = await vinRes.json();
+
+      const normalizedCar = await extractCarDataFromVin(carData.data.car, vin);
+      console.log("Normalized car result:", normalizedCar);
 
       const newUser = new User({
         phone: phoneNumber,
         name: message.from?.first_name || "Unknown",
         isVerified: true,
         car: {
-          vin,
-          make: "",
-          model: "",
-          year: 0,
-          color: "",
-          mileage: 0,
-          licensePlate: "",
-          engine: "",
-          transmission: "",
-          driveType: "",
-          fuelType: "",
+          vin: normalizedCar.vin,
+          make: normalizedCar.make,
+          model: normalizedCar.model,
+          year: normalizedCar.year,
+          color: normalizedCar.color,
+          engine: normalizedCar.engine,
+          transmission: normalizedCar.transmission,
+          driveType: normalizedCar.driveType,
+          fuelType: normalizedCar.fuelType,
         },
         parts: [
           {

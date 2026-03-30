@@ -50,27 +50,8 @@ const App = () => {
   const handleClick = async () => {
     try {
       // Example fetch from frontend
-      const response = await fetch("/api/py/shatem", {
+      const response = await fetch("/api/add", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          partNumber: "252813C100",
-          agreement: "KSAGR00684",
-          partName: "Масляный фильтр",
-          car_data: JSON.stringify({
-            make: "HYUNDAI-KIA",
-            model: "SORENTO",
-            year: "2013",
-            vin: "XW7BF4FK60S034402",
-          }),
-          antiforgery:
-            "CfDJ8BRlJW09mapOlcK9tRvTNIn3-MsGD6YthJFH_dwsHqmQpxjPuiDjJUaQ8OxIqZJhq7E5hClMzOxrT0KPpR5PQol2P6TXNrNDmpwsMaQKm8w89FGuaHPLySeuP1jT88iVZ3A_hZNFMqtQHKuTFRbdL9I",
-          x_access_token:
-            "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJKWEV0NzRhNFJrM1dlUTQycVNvV1Q2ZTNBbVdMYTVhRkRmZTdINlViWkxFIn0.eyJleHAiOjE3NzQ1MTQwMjAsImlhdCI6MTc3NDUxMjIyMCwianRpIjoiZDYxZWU5OWEtZmUyNi00NDY1LWE3NWYtZjc5MGMwODIyYjIyIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLWtleWNsb2FrLW5ldy5zaGF0ZS1tLmt6L3JlYWxtcy9iMmIiLCJhdWQiOlsiU2hhdGUuQjJiLkFwcCIsImFjY291bnQiXSwic3ViIjoiM2UwOTg2MzMtOTMwMi00MDY3LWI0OTUtMmZkOWEzN2M5N2JiIiwidHlwIjoiQmVhcmVyIiwiYXpwIjoiU2hhdGUuQjJiLkFwcC5TaG9ydExpdmUiLCJzaWQiOiJiYTQ3YTQ4Mi1jZTllLTRkMmYtODEwMi1mMWQ5NDRhNWUzZGUiLCJhY3IiOiIxIiwiYWxsb3dlZC1vcmlnaW5zIjpbIi8qIl0sInJlYWxtX2FjY2VzcyI6eyJyb2xlcyI6WyJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIiwiZGVmYXVsdC1yb2xlcy1iMmIiXX0sInJlc291cmNlX2FjY2VzcyI6eyJTaGF0ZS5CMmIuQXBwIjp7InJvbGVzIjpbInVzZXIiXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoicHJvZmlsZSBlbWFpbCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6ItCl0LXQudC40YDQvtCyINCt0YLQuNCx0LDRgCDQodC40YDQsNC00LbQtdC00LTQuNC90L7QstC40YciLCJjdXN0b21lckNvZGUiOiJLUzAwNjcwIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiY2FybWF4IiwiZ2l2ZW5fbmFtZSI6ItCl0LXQudC40YDQvtCyINCt0YLQuNCx0LDRgCDQodC40YDQsNC00LbQtdC00LTQuNC90L7QstC40YciLCJ1bmlxdWVJZCI6IjY5NCJ9.c6v2ArPE8DF23_-hBbOTzXQ5x2GkuZ6iXYNBxU5NhL0rpryEKud9rJMgFlvWcDQZfbVRI7U4ig5zmMP9H7PIhguITzGWfovLMMt0Z0BwS14m6up0zgAHP7Xd78BhMZWnHlRobyr8awJHVBWqI3y-VuAykod34zp2EXIaK-soCAybL34sILi0kvVy1u7s-iOc0Kdktc0e0ZE6wAttWXide9kbN2Z0oM0jpLNvps_C5yn4kJLGGyU565zUjuKJffWmQrgIWsFUDiWk3QC97sKT9JfvtBEL8m1CeGynB7GDi4eS0CK8B6A-HG4MhgtHMWAzSI9AZa1oHd0_pcRNEIS19g",
-          x_refresh_token:
-            "eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICI3OGRlZGE1Ny02YmM0LTQ4YzAtOGZkZi0xYzQzNzI1NWE1YzMifQ.eyJleHAiOjE3NzQ1NTU0MjAsImlhdCI6MTc3NDUxMjIyMCwianRpIjoiYTFkYTg4ZWEtOTg0YS00MmU1LWIxZTUtY2Y5NDg5Mjc5MjEyIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLWtleWNsb2FrLW5ldy5zaGF0ZS1tLmt6L3JlYWxtcy9iMmIiLCJhdWQiOiJodHRwczovL2F1dGgta2V5Y2xvYWstbmV3LnNoYXRlLW0ua3ovcmVhbG1zL2IyYiIsInN1YiI6IjNlMDk4NjMzLTkzMDItNDA2Ny1iNDk1LTJmZDlhMzdjOTdiYiIsInR5cCI6IlJlZnJlc2giLCJhenAiOiJTaGF0ZS5CMmIuQXBwLlNob3J0TGl2ZSIsInNpZCI6ImJhNDdhNDgyLWNlOWUtNGQyZi04MTAyLWYxZDk0NGE1ZTNkZSIsInNjb3BlIjoicHJvZmlsZSB3ZWItb3JpZ2lucyBlbWFpbCByb2xlcyBiYXNpYyBhY3IifQ.YGWxz7VaAULNNLjHmCV4wrRfp9H_MnreAcPWIuWTTnRgNt1ZKPClc1HPlFIs1u7_6tuiZPCvvq7GB95hdUUbsg",
-          city: "Астана",
-        }),
       });
       const data = await response.json();
       console.log(data);

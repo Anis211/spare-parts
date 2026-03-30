@@ -1,6 +1,93 @@
 import { spawn } from "child_process";
 import path from "path";
 
+// === VIN Response Parser ===
+function parseVinResponse(rawResult) {
+  try {
+    // Step 1: Extract the actual API response from Python wrapper
+    let apiResponse = null;
+
+    if (rawResult?.data) {
+      apiResponse = rawResult.data;
+    } else if (rawResult?.response_text) {
+      // response_text is a JSON string that needs parsing
+      apiResponse = JSON.parse(rawResult.response_text);
+    } else {
+      throw new Error("No valid response data found");
+    }
+
+    // Step 2: Validate required fields
+    if (!apiResponse?.car && !apiResponse?.id && !apiResponse?.brand) {
+      // If response doesn't have car wrapper, it might be the car object itself
+      if (apiResponse?.id && apiResponse?.name && apiResponse?.brand) {
+        apiResponse = { car: apiResponse };
+      } else {
+        throw new Error("Invalid VIN response structure");
+      }
+    }
+
+    const car = apiResponse.car || apiResponse;
+
+    // Step 3: Parse attributes array into a clean object
+    const attributes = {};
+    if (Array.isArray(car.attributes)) {
+      for (const attr of car.attributes) {
+        if (attr?.key && attr?.value) {
+          attributes[attr.key] = {
+            value: attr.value,
+            name: attr.name || attr.key,
+          };
+        }
+      }
+    }
+
+    // Step 4: Return structured data your app expects
+    return {
+      vin: rawResult.vin || null,
+      car: {
+        id: car.id || null,
+        name: car.name || null, // e.g., "CAMRY/HYBRID"
+        brand: car.brand || null, // e.g., "TOYOTA"
+        brandImageUrl: car.brandImageUrl?.trim() || null,
+        catalog: car.catalog || null, // e.g., "TOYOTA00"
+        ssd: car.ssd || null, // encrypted catalog identifier
+        catalogAggregator: car.catalogAggregator || "Laximo",
+        supportQuickGroups: car.supportQuickGroups || false,
+        supportParametersSearch: car.supportParametersSearch || false,
+        attributes, // parsed key-value attributes
+        // Convenience fields extracted from attributes:
+        modelCode: attributes.model?.value || null,
+        productionDate: attributes.date?.value || null,
+        productionPeriod: attributes.prodPeriod?.value || null,
+        market:
+          attributes.options?.value
+            ?.match(/Рынок сбыта:\s*([^;]+)/)?.[1]
+            ?.trim() || null,
+        engine:
+          attributes.options?.value
+            ?.match(/Двигатель:\s*([^;]+)/)?.[1]
+            ?.trim() || null,
+        transmission:
+          attributes.options?.value
+            ?.match(/Тип трансмиссии:\s*([^;]+)/)?.[1]
+            ?.trim() || null,
+      },
+      meta: {
+        source: "rossko",
+        fetchedAt: new Date().toISOString(),
+        rawResponse: rawResult, // Keep for debugging if needed
+      },
+    };
+  } catch (err) {
+    console.error("[parseVinResponse] Error:", err.message);
+    console.error(
+      "[parseVinResponse] Raw input:",
+      JSON.stringify(rawResult).slice(0, 500),
+    );
+    throw new Error(`Failed to parse VIN response: ${err.message}`);
+  }
+}
+
 export default async function handler(req, res) {
   const params = req.method === "POST" ? req.body : req.query;
   const vin = params.vin?.toString().trim();

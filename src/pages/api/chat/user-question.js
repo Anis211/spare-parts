@@ -136,18 +136,38 @@ function toShortSchema(original, analogs) {
   return { O, A };
 }
 
+// === Helper: Fix invalid escape sequences in JSON strings ===
+function fixJsonEscapes(jsonStr) {
+  console.log("[DEBUG] fixJsonEscapes called with length:", jsonStr.length);
+
+  let result = jsonStr;
+  let prev;
+  do {
+    prev = result;
+
+    result = result.replace(/\\([^"\\/bfnrtu])/g, "$1");
+  } while (result !== prev);
+
+  result = result.replace(/\\"/g, '"');
+
+  return result;
+}
+
 // === Parser For Reservation Data ===
 function parseReservationResponse(str) {
   if (typeof str !== "string") return null;
+
+  // 1. Strip markdown code blocks
   let cleaned = str.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/g, "$1").trim();
-
-  cleaned = cleaned.replace(/\\ /g, "\\\\ ");
-
   if (!cleaned) return null;
+
+  // 2. Fix common LLM escaping issues BEFORE parsing
+  cleaned = fixJsonEscapes(cleaned);
 
   try {
     const parsed = JSON.parse(cleaned);
 
+    // 3. Validate structure
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return null;
     if (typeof parsed.confirmationMessage !== "string") return null;
@@ -180,11 +200,8 @@ function parseReservationResponse(str) {
 
     return parsed;
   } catch (e) {
-    console.warn(
-      "Failed to parse reservation response after fixes:",
-      e.message,
-    );
-    console.warn("Problematic string snippet:", cleaned.substring(0, 200));
+    console.warn("Failed to parse reservation response:", e.message);
+    console.warn("Problematic snippet:", cleaned.substring(0, 300));
     return null;
   }
 }
@@ -262,13 +279,15 @@ Do not output images unless asked.
 Output the part name and brands exactly how they are in the data recieved, do not shorten them or use part name for the other brand, but do not include article of the part in part name, if there is 7 parts you must output all 7 of them
 
 order_parts rules:
-Use when the user wants or confirms an order.
-Reply friendly confirmation listing ordered parts.
-
+Use when the user expresses intent to purchase, order, buy, take, reserve, or confirm ANY part from the shown analogs list.
+Trigger phrases include: "let me take", "I want", "I'll buy", "order this", "confirm", "book", "reserve", "get this one", brand names alone (e.g., "CTR", "the CTR one")
+When user mentions a brand from the analogs list, match it to the exact part data from chat history.
+Reply with friendly confirmation listing ordered parts with brand, name, quantity, price.
 Example:
 Your order is confirmed! 🎉
-1) STELLOX Oil Filter
-2) KS Oil Filter
+1) CTR Oil Filter - 2,453₸
+2) Mann Oil Filter - 925₸
+Always confirm quantity (default 1 if not specified).
 
 find_and_send_pictures rules:
 Use when user asks to see or compare a part.
@@ -343,7 +362,8 @@ Need help choosing? 🚗💨
               },
               vin: {
                 type: "string",
-                description: "The VIN code of the user's car",
+                description:
+                  "The VIN code. If unknown or not provided by user, return the string 'nothing' (lowercase). The backend will handle retrieval.",
               },
             },
             required: ["partName1", "vin"],
@@ -354,7 +374,10 @@ Need help choosing? 🚗💨
         type: "function",
         function: {
           name: "order_parts",
-          description: "Order the selected parts for the user",
+          description:
+            "Trigger when user wants to order, buy, purchase, take, reserve, or confirm ANY part from the analogs list. " +
+            "Also trigger when user mentions a brand name from the search results (e.g., 'CTR', 'the CTR one', 'Mann'). " +
+            "Use this for any purchase intent expression.",
           parameters: {
             type: "object",
             properties: {
@@ -366,16 +389,29 @@ Need help choosing? 🚗💨
                     partName: {
                       type: "string",
                       description:
-                        "It is the name of the part being ordered (it must be the same as it is in the previous message history)",
+                        "Exact part name from the analogs list shown to user (from chat history)",
                     },
-                    brand: { type: "string" },
-                    orderQuantity: { type: "number", minimum: 1 },
-                    partPrice: { type: "number" },
+                    brand: {
+                      type: "string",
+                      description:
+                        "Brand name from analogs list (e.g., CTR, Mann, BMW)",
+                    },
+                    orderQuantity: {
+                      type: "number",
+                      minimum: 1,
+                      description:
+                        "Quantity user wants (default 1 if not specified)",
+                    },
+                    partPrice: {
+                      type: "number",
+                      description:
+                        "Price from the analogs list for this brand/part",
+                    },
                   },
                   required: ["orderQuantity", "partName", "partPrice", "brand"],
                 },
                 description:
-                  "Array of objects that contains: brand, partName, quantity on the brand and partName, and if the analog is from stock then analogDist.fromStock is true and the analogDist.place will contain the , else analogDist is false",
+                  "Array of parts user wants to order from the shown analogs",
               },
             },
             required: ["partNumbers"],
@@ -501,13 +537,42 @@ Need help choosing? 🚗💨
       model: "gpt-4o",
       tools,
       tool_choice: "auto",
-      temperature: 1,
+      temperature: 0.7,
     });
 
     const responseMessage = firstResponse.choices[0].message;
     let finalResponse;
     let matchedPartIds = [];
     let chatData = null;
+
+    const orderIntentPatterns = [
+      /беру|возьму|закажу|куплю|order|buy|take|want|confirm|reserve|book/i,
+      /\b(ctr|mann|bmw|kayaba|ngk|bosch)\b/i,
+    ];
+
+    const userLastMessage =
+      userMessages[userMessages.length - 1]?.toLowerCase() || "";
+    const hasOrderIntent = orderIntentPatterns.some((pattern) =>
+      pattern.test(userLastMessage),
+    );
+
+    if (hasOrderIntent && !responseMessage.tool_calls) {
+      messages.push({
+        role: "user",
+        content:
+          "USER INTENT: Order parts. Please use order_parts function with available analogs from chat history.",
+      });
+
+      const retryResponse = await llmChat(messages, {
+        model: "gpt-4o",
+        tools,
+        tool_choice: { type: "function", function: { name: "order_parts" } },
+        temperature: 0.3,
+      });
+
+      // Continue with tool handling using retryResponse
+      responseMessage = retryResponse.choices[0].message;
+    }
 
     // ✅ Handle tool calls
     if (responseMessage.tool_calls) {
@@ -530,8 +595,113 @@ Need help choosing? 🚗💨
           }
         }
 
-        const { partName1, vin } = functionArgs;
+        const { partName1, vin: argVin } = functionArgs;
         let partName = partName1;
+        let vin = argVin;
+
+        // 🔥 Aggressive VIN validation (catches "nothing", empty, null, undefined)
+        const isVinInvalid =
+          !vin ||
+          vin.toString().trim() === "" ||
+          vin.toString().toLowerCase() === "nothing";
+
+        console.log("=== 🚗 VIN DEBUG START ===");
+        console.log("argVin raw:", JSON.stringify(argVin));
+        console.log("argVin type:", typeof argVin);
+        console.log("isVinInvalid:", isVinInvalid);
+
+        if (isVinInvalid) {
+          console.log(
+            "🔍 VIN invalid, attempting DB lookup for chatId:",
+            rest.chatId,
+          );
+
+          try {
+            // 🔥 Use .lean() for faster read + add explicit projection
+            const user = await User.findOne(
+              { "chatId.id": rest.chatId },
+              "car.vin car.make car.model phone name", // Only fetch needed fields
+            ).lean();
+
+            console.log("📦 DB Query Result:");
+            console.log("  - user found:", !!user);
+            console.log("  - user._id:", user?._id?.toString?.());
+            console.log("  - user.car:", JSON.stringify(user?.car));
+            console.log("  - user.car.vin:", user?.car?.vin);
+
+            // ✅ Correct path: user.car.vin
+            if (user?.car?.vin) {
+              vin = user.car.vin;
+              console.log("✅ VIN retrieved successfully:", vin);
+            } else {
+              console.log(
+                "❌ No VIN in database - car field exists:",
+                !!user?.car,
+              );
+              console.log(
+                "❌ Available car keys:",
+                user?.car ? Object.keys(user.car) : "N/A",
+              );
+
+              // Send error back to LLM
+              const errorResponse = {
+                status: "error",
+                message:
+                  "Please provide your car's VIN code so I can find the correct part.",
+                partNumber: null,
+              };
+
+              messages.push(responseMessage);
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                name: functionName,
+                content: JSON.stringify(errorResponse),
+              });
+
+              finalResponse = await llmChat(messages, {
+                model: "gpt-4o",
+                max_tokens: 800,
+                temperature: 0,
+              });
+
+              // Early return to stop processing
+              const aiResponse = finalResponse.choices[0].message.content;
+              // ... (your chat save logic here)
+              return res
+                .status(200)
+                .json({ response: aiResponse, matchedPartIds, success: true });
+            }
+          } catch (dbErr) {
+            console.error("💥 Database lookup failed:", dbErr.message);
+            console.error("Stack:", dbErr.stack);
+
+            // Fallback: ask user for VIN
+            const errorResponse = {
+              status: "error",
+              message:
+                "Unable to retrieve your car data. Please provide your VIN code.",
+            };
+            messages.push(responseMessage);
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              name: functionName,
+              content: JSON.stringify(errorResponse),
+            });
+            finalResponse = await llmChat(messages, {
+              model: "gpt-4o",
+              max_tokens: 500,
+            });
+            return res.status(200).json({
+              response: finalResponse.choices[0].message.content,
+              matchedPartIds,
+              success: true,
+            });
+          }
+        }
+        console.log("=== 🚗 VIN DEBUG END ===");
+        console.log("🚗 Proceeding with VIN:", vin, "and part:", partName);
 
         // ── Handle pagination/"show more" requests ────────────────────────────────────
         const isPaginationRequest =
@@ -1736,7 +1906,6 @@ ${remainingAfter > 0 ? `\n\n💡 ${remainingAfter} more options available. Type 
             fmt: "TONv1",
             ton,
             partNumber,
-            // 🔥 Pagination metadata for frontend/LLM
             pagination: {
               total: analogs.length,
               displayed: firstBatch.length,
@@ -2263,6 +2432,7 @@ Example output structure:
 
                   const rawResponse = await llmChat(partsMessages, {
                     model: "gpt-4o-mini",
+                    response_format: { type: "json_object" },
                   });
 
                   const content =
@@ -2273,9 +2443,43 @@ Example output structure:
 
                   const rawServices = parseReservationResponse(content);
                   console.log("Parsed Raw Services: ", rawServices);
+
+                  // ✅ Critical guard clause
+                  if (!rawServices?.services) {
+                    console.error(
+                      "Reservation parsing failed. Raw content:",
+                      content,
+                    );
+
+                    const functionResponse = {
+                      status: "error",
+                      message:
+                        "Could not process reservation details. Please try again.",
+                    };
+
+                    messages.push(responseMessage);
+                    messages.push({
+                      role: "tool",
+                      tool_call_id: toolCall.id,
+                      name: functionName,
+                      content: JSON.stringify(functionResponse),
+                    });
+
+                    finalResponse = await llmChat(messages, {
+                      model: "gpt-4o",
+                    });
+
+                    // ✅ Send HTTP response before returning
+                    return res.status(200).json({
+                      response: finalResponse.choices[0].message.content,
+                      parsed: false,
+                    });
+                  }
+
+                  // Now safe to access:
                   console.log(
                     "Parsed Raw Service Items: ",
-                    rawServices.services[0].parts,
+                    rawServices.services[0]?.parts,
                   );
 
                   for (const service of rawServices.services) {
